@@ -1,532 +1,527 @@
+
 from flask import Flask, request, jsonify, render_template_string
+from collections import deque
+from threading import Lock
 import math
 import time
-from collections import deque
 
 app = Flask(__name__)
+lock = Lock()
 
-# ==========================================================
-# SEISMIC CORE X — MOTOR DE DETECCIÓN
-# ==========================================================
+# =========================================================
+# CONFIGURACION DEL SISTEMA
+# =========================================================
 
-UMBRAL_VIBRACION = 0.040
-UMBRAL_TEMBLOR = 0.060
+UMBRAL_VIBRACION = 0.025
+UMBRAL_TEMBLOR = 0.045
 UMBRAL_ALERTA = 0.120
+UMBRAL_ESTABLE = 0.010
 
-UMBRAL_ESTABLE = 0.020
 TIEMPO_ESTABLE_ALERTA = 5.0
-TIEMPO_FIN_EVENTO = 2.0
+TIEMPO_FIN_EVENTO = 1.0
 
 MUESTRAS_CALIBRACION = 100
 MUESTRAS_FILTRO = 5
-TIEMPO_SENSOR_DESCONECTADO = 5.0
 
-base_x = 0.0
-base_y = 0.0
-base_z = 0.0
+historial_filtro = deque(maxlen=MUESTRAS_FILTRO)
+historial_grafico = deque(maxlen=180)
+registro_eventos = deque(maxlen=30)
 
-calibrando = True
-muestras_calibracion = []
-filtro = deque(maxlen=MUESTRAS_FILTRO)
+estado = {
+    "calibrando": True,
+    "estado": "CALIBRANDO SENSOR",
+    "magnitud": 0.0,
+    "filtrada": 0.0,
+    "nivel": 0,
+    "direccion": "SIN DATOS",
+    "evento_activo": False,
+    "inicio_evento": None,
+    "ultima_actividad": 0.0,
+    "inicio_alerta": None,
+    "contador": 0,
+    "ultima_actualizacion": time.time(),
+    "x": 0.0,
+    "y": 0.0,
+    "z": 0.0,
+    "duracion": 0.0,
+    "ultimo_evento": "NINGUNO"
+}
 
-ultima_magnitud = 0.0
-magnitud_filtrada = 0.0
-
-estado_actual = "ESPERANDO SENSOR"
-nivel_actual = 1
-
-ultimo_movimiento = 0.0
-inicio_estabilidad = None
-alerta_declarada = False
-
-ultimo_x = 0.0
-ultimo_y = 0.0
-ultimo_z = 0.0
-
-evento_activo = False
-inicio_evento = None
-ultimo_dato_sensor = 0.0
-
-
-def procesar_calibracion(x, y, z):
-    global base_x, base_y, base_z, calibrando
-    global muestras_calibracion
-
-    muestras_calibracion.append((x, y, z))
-
-    if len(muestras_calibracion) >= MUESTRAS_CALIBRACION:
-        cantidad = len(muestras_calibracion)
-
-        base_x = sum(p[0] for p in muestras_calibracion) / cantidad
-        base_y = sum(p[1] for p in muestras_calibracion) / cantidad
-        base_z = sum(p[2] for p in muestras_calibracion) / cantidad
-
-        calibrando = False
-        filtro.clear()
-
-        print("Calibración terminada")
-        print("Base X:", base_x)
-        print("Base Y:", base_y)
-        print("Base Z:", base_z)
+muestras_calibracion = 0
+suma_calibracion = 0.0
 
 
-def procesar_sensor(x, y, z):
-    global ultima_magnitud, magnitud_filtrada
-    global estado_actual, nivel_actual
-    global ultimo_movimiento, inicio_estabilidad
-    global alerta_declarada, ultimo_x, ultimo_y, ultimo_z
-    global evento_activo, inicio_evento
-
-    ultimo_x, ultimo_y, ultimo_z = x, y, z
-
-    if calibrando:
-        procesar_calibracion(x, y, z)
-        return
-
-    x_corregido = x - base_x
-    y_corregido = y - base_y
-    z_corregido = z - base_z
-
-    magnitud = math.sqrt(
-        x_corregido ** 2 +
-        y_corregido ** 2 +
-        z_corregido ** 2
-    )
-
-    ultima_magnitud = magnitud
-    filtro.append(magnitud)
-    magnitud_filtrada = sum(filtro) / len(filtro)
-
-    ahora = time.time()
-
-    if magnitud_filtrada >= UMBRAL_ALERTA:
-        estado_actual = "ALERTA CRÍTICA"
-        nivel_actual = 4
-        alerta_declarada = True
-        evento_activo = True
-
-        if inicio_evento is None:
-            inicio_evento = ahora
-
-        ultimo_movimiento = ahora
-        inicio_estabilidad = None
-        return
-
-    if alerta_declarada:
-        if magnitud_filtrada <= UMBRAL_ESTABLE:
-            if inicio_estabilidad is None:
-                inicio_estabilidad = ahora
-
-            elif ahora - inicio_estabilidad >= TIEMPO_ESTABLE_ALERTA:
-                alerta_declarada = False
-                estado_actual = "SISTEMA ESTABLE"
-                nivel_actual = 1
-                evento_activo = False
-                inicio_evento = None
-                ultimo_movimiento = 0.0
-                inicio_estabilidad = None
-        else:
-            inicio_estabilidad = None
-            ultimo_movimiento = ahora
-            evento_activo = True
-        return
-
-    if magnitud_filtrada >= UMBRAL_TEMBLOR:
-        estado_actual = "SISMO EN CURSO"
-        nivel_actual = 3
-        evento_activo = True
-
-        if inicio_evento is None:
-            inicio_evento = ahora
-
-        ultimo_movimiento = ahora
-        inicio_estabilidad = None
-        return
-
-    if magnitud_filtrada >= UMBRAL_VIBRACION:
-        estado_actual = "MOVIMIENTO DETECTADO"
-        nivel_actual = 2
-        evento_activo = True
-
-        if inicio_evento is None:
-            inicio_evento = ahora
-
-        ultimo_movimiento = ahora
-        inicio_estabilidad = None
-        return
-
-    if evento_activo:
-        if ultimo_movimiento > 0 and ahora - ultimo_movimiento >= TIEMPO_FIN_EVENTO:
-            estado_actual = "SISTEMA ESTABLE"
-            nivel_actual = 1
-            evento_activo = False
-            inicio_evento = None
-            ultimo_movimiento = 0.0
-        return
-
-    estado_actual = "SISTEMA ESTABLE"
-    nivel_actual = 1
+def num(valor, defecto=0.0):
+    try:
+        n = float(valor)
+        return n if math.isfinite(n) else defecto
+    except (TypeError, ValueError):
+        return defecto
 
 
-def calcular_direccion():
-    if not evento_activo:
-        return None
+def clasificar(magnitud, duracion):
+    # La magnitud fuerte puede generar alerta incluso
+    # cuando el evento es breve.
+    if magnitud >= UMBRAL_ALERTA:
+        return 4, "ALERTA CRITICA"
 
-    x = ultimo_x - base_x
-    y = ultimo_y - base_y
+    if magnitud >= UMBRAL_TEMBLOR and duracion >= 0.30:
+        return 3, "SISMO EN CURSO"
 
-    if math.sqrt(x * x + y * y) < 0.0005:
-        return None
+    if magnitud >= UMBRAL_VIBRACION and duracion >= 0.15:
+        return 2, "MOVIMIENTO DETECTADO"
 
-    grados = math.degrees(math.atan2(x, y))
+    if magnitud >= UMBRAL_ESTABLE:
+        return 1, "VIBRACION LEVE"
 
-    if grados < 0:
-        grados += 360
-
-    distancia = magnitud_filtrada / UMBRAL_ALERTA * 0.82
-    distancia = max(0.10, min(0.82, distancia))
-
-    return {
-        "angulo": grados,
-        "distancia": distancia
-    }
+    return 0, "SISTEMA ESTABLE"
 
 
-# ==========================================================
-# API ORIGINAL: /datos Y /estado
-# ==========================================================
+@app.route("/")
+def index():
+    return render_template_string(PAGINA)
+
 
 @app.route("/datos", methods=["POST"])
 def recibir_datos():
-    global ultimo_dato_sensor
+    global muestras_calibracion, suma_calibracion
 
-    try:
-        datos = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
 
-        x = float(datos.get("x", 0))
-        y = float(datos.get("y", 0))
-        z = float(datos.get("z", 0))
+    # Acepta nombres habituales usados por el ESP8266.
+    x = num(data.get("x", data.get("ax", data.get("accelX", 0))))
+    y = num(data.get("y", data.get("ay", data.get("accelY", 0))))
+    z = num(data.get("z", data.get("az", data.get("accelZ", 0))))
 
-        ultimo_dato_sensor = time.time()
-        procesar_sensor(x, y, z)
+    # Si el ESP8266 ya envía una magnitud calculada,
+    # se aprovecha ese dato.
+    magnitud_recibida = data.get("magnitud", data.get("m"))
 
-        return jsonify({"ok": True})
-
-    except Exception as error:
-        print("Error recibiendo datos:", error)
-        return jsonify({"ok": False, "error": str(error)}), 400
-
-
-@app.route("/estado")
-def obtener_estado():
-    sensor_conectado = (
-        ultimo_dato_sensor > 0
-        and time.time() - ultimo_dato_sensor < TIEMPO_SENSOR_DESCONECTADO
-    )
-
-    if not sensor_conectado:
-        estado_visible = "ESPERANDO SENSOR"
-        nivel_visible = 1
-    elif calibrando:
-        estado_visible = "CALIBRANDO SENSOR"
-        nivel_visible = 1
+    if magnitud_recibida is not None:
+        magnitud = abs(num(magnitud_recibida))
     else:
-        estado_visible = estado_actual
-        nivel_visible = nivel_actual
+        magnitud = math.sqrt(x*x + y*y + z*z)
 
+    ahora = time.time()
+
+    with lock:
+        estado["x"] = x
+        estado["y"] = y
+        estado["z"] = z
+        estado["magnitud"] = magnitud
+        estado["contador"] += 1
+        estado["ultima_actualizacion"] = ahora
+
+        if estado["calibrando"]:
+            muestras_calibracion += 1
+            suma_calibracion += magnitud
+
+            if muestras_calibracion >= MUESTRAS_CALIBRACION:
+                estado["calibrando"] = False
+                estado["estado"] = "SISTEMA ESTABLE"
+                estado["filtrada"] = 0.0
+                historial_filtro.clear()
+                historial_grafico.clear()
+
+            return jsonify({
+                "ok": True,
+                "calibrando": estado["calibrando"]
+            })
+
+        historial_filtro.append(magnitud)
+        filtrada = sum(historial_filtro) / len(historial_filtro)
+        estado["filtrada"] = filtrada
+
+        historial_grafico.append({
+            "t": ahora,
+            "v": round(filtrada, 5)
+        })
+
+        if filtrada >= UMBRAL_VIBRACION:
+            if not estado["evento_activo"]:
+                estado["evento_activo"] = True
+                estado["inicio_evento"] = ahora
+                estado["inicio_alerta"] = None
+                estado["ultimo_evento"] = time.strftime(
+                    "%H:%M:%S", time.localtime(ahora)
+                )
+
+            estado["ultima_actividad"] = ahora
+
+        duracion = 0.0
+        if estado["evento_activo"] and estado["inicio_evento"]:
+            duracion = ahora - estado["inicio_evento"]
+
+        estado["duracion"] = round(duracion, 2)
+
+        nivel, nombre = clasificar(filtrada, duracion)
+
+        if estado["evento_activo"]:
+            estado["nivel"] = nivel
+            estado["estado"] = nombre
+
+            if nivel >= 3 and estado["inicio_alerta"] is None:
+                estado["inicio_alerta"] = ahora
+
+            # Finaliza el evento solo después de un período
+            # continuo de baja actividad.
+            silencio = ahora - estado["ultima_actividad"]
+
+            if silencio >= TIEMPO_FIN_EVENTO:
+                registro_eventos.appendleft({
+                    "hora": time.strftime(
+                        "%H:%M:%S", time.localtime(ahora)
+                    ),
+                    "nivel": estado["nivel"],
+                    "estado": estado["estado"],
+                    "maximo": round(filtrada, 4),
+                    "duracion": round(duracion, 2)
+                })
+
+                estado["evento_activo"] = False
+                estado["inicio_evento"] = None
+                estado["inicio_alerta"] = None
+                estado["duracion"] = 0.0
+                estado["nivel"] = 0
+                estado["estado"] = "SISTEMA ESTABLE"
+                estado["direccion"] = "SIN MOVIMIENTO"
+        else:
+            estado["nivel"] = nivel
+            estado["estado"] = nombre if nivel == 0 else "SISTEMA ESTABLE"
+
+    return jsonify({"ok": True})
+
+
+@app.route("/estado", methods=["GET"])
+def obtener_estado():
+    ahora = time.time()
+
+    with lock:
+        resultado = dict(estado)
+        resultado["historial"] = list(historial_grafico)
+        resultado["eventos"] = list(registro_eventos)
+
+        if ahora - estado["ultima_actualizacion"] > 10:
+            resultado["estado"] = "SIN DATOS DEL SENSOR"
+            resultado["direccion"] = "REVISAR CONEXION"
+
+        return jsonify(resultado)
+
+
+@app.route("/salud", methods=["GET"])
+def salud():
     return jsonify({
-        "estado": estado_visible,
-        "nivel": nivel_visible,
-        "magnitud": round(ultima_magnitud, 5),
-        "filtrada": round(magnitud_filtrada, 5),
-        "calibrando": calibrando,
-        "evento": evento_activo if sensor_conectado else False,
-        "direccion": calcular_direccion() if sensor_conectado else None,
-        "sensor_conectado": sensor_conectado,
-        "timestamp": time.time()
+        "ok": True,
+        "sistema": "SEISMIC CORE X",
+        "servidor": "activo"
     })
 
 
-# ==========================================================
-# NUEVO DISEÑO HUD — SEISMIC CORE X
-# ==========================================================
-
-HTML = r"""
+PAGINA = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SEISMIC CORE X | Monitoring System</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SEISMIC CORE X</title>
 <style>
 :root {
-    --green: #00ff78;
-    --green2: #8affbb;
-    --bg: #020704;
-    --panel: rgba(4, 18, 11, .94);
-    --border: rgba(0, 255, 120, .27);
-    --muted: #669b7a;
-    --yellow: #eaff00;
-    --orange: #ff8c32;
-    --red: #ff304e;
+ --bg:#030811; --panel:#071522; --line:#12384b;
+ --cyan:#00eaff; --green:#35ffb0; --yellow:#ffd45a;
+ --orange:#ff8c42; --red:#ff3e5d; --text:#d6f8ff;
+ --muted:#6b9ba9;
 }
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:var(--bg);
+ color:var(--text);font-family:Consolas,"Courier New",monospace}
+body{overflow:auto;background:
+ radial-gradient(ellipse at 50% 40%,#0a2638 0%,#030811 65%)}
+button{font-family:inherit;cursor:pointer}
+#app{min-height:100vh;padding:12px;display:flex;flex-direction:column;gap:10px}
+header{display:flex;justify-content:space-between;align-items:center;
+ gap:12px;border-bottom:1px solid var(--line);padding:8px 4px 13px}
+.brand{font-size:clamp(20px,2.5vw,36px);font-weight:bold;letter-spacing:4px;
+ color:var(--cyan);text-shadow:0 0 15px #00cce8}
+.subtitle{font-size:11px;color:var(--muted);letter-spacing:2px;margin-top:5px}
+.header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pill{border:1px solid var(--line);padding:8px 11px;font-size:11px}
+.online{color:var(--green)}
+.btn{background:#08202c;color:var(--cyan);border:1px solid #12627b;padding:9px 12px}
+.layout{display:grid;grid-template-columns:minmax(270px,1fr) minmax(300px,1.35fr) minmax(250px,1fr);
+ gap:10px;flex:1}
+.panel{position:relative;background:linear-gradient(145deg,#081724dd,#030a13f5);
+ border:1px solid var(--line);padding:14px;min-width:0;overflow:hidden}
+.panel:before{content:"";position:absolute;top:0;left:0;width:55px;height:2px;background:var(--cyan)}
+.heading{font-size:12px;color:var(--cyan);letter-spacing:2px;margin-bottom:13px}
+.status{font-size:clamp(18px,2vw,27px);font-weight:bold;line-height:1.3;
+ color:var(--green);text-shadow:0 0 14px currentColor}
+.small{font-size:10px;color:var(--muted);letter-spacing:1px}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:17px}
+.metric{border:1px solid #102e3d;padding:12px;background:#04101a}
+.metric .value{font-size:clamp(18px,2vw,28px);color:var(--cyan);margin-top:8px}
+.metric .unit{font-size:10px;color:var(--muted)}
+.bar{height:7px;background:#102331;margin-top:10px;overflow:hidden}
+.bar>div{height:100%;width:0;background:var(--cyan);transition:width .2s}
+.radar-panel{display:flex;flex-direction:column;align-items:center}
+.radar{position:relative;width:min(100%,min(49vh,470px));aspect-ratio:1;
+ border-radius:50%;border:1px solid #16708a;
+ background:repeating-radial-gradient(circle,transparent 0 12%,#0c3b4b 12.2% 12.5%,transparent 12.7% 24%),
+ linear-gradient(90deg,transparent 49.8%,#174355 50%,transparent 50.2%),
+ linear-gradient(transparent 49.8%,#174355 50%,transparent 50.2%);
+ box-shadow:0 0 25px #00394c66,inset 0 0 25px #00394c66;overflow:hidden}
+.radar:before{content:"";position:absolute;inset:0;border-radius:50%;
+ background:conic-gradient(from 0deg,transparent 0deg,transparent 310deg,#00eaff08 330deg,#00eaff55 355deg,#00eaffaa 360deg);
+ animation:sweep 5s linear infinite}
+.radar:after{content:"";position:absolute;left:50%;top:50%;width:7px;height:7px;
+ transform:translate(-50%,-50%);border-radius:50%;background:var(--cyan);
+ box-shadow:0 0 15px var(--cyan)}
+@keyframes sweep{to{transform:rotate(360deg)}}
+.cross{position:absolute;background:#164253}
+.cross.h{height:1px;left:0;right:0;top:50%}
+.cross.v{width:1px;top:0;bottom:0;left:50%}
+.event-point{position:absolute;width:12px;height:12px;border-radius:50%;
+ transform:translate(-50%,-50%);z-index:3;display:none;
+ background:var(--yellow);box-shadow:0 0 16px currentColor}
+.event-point.active{display:block;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.35;box-shadow:0 0 28px currentColor}}
+.radar-label{margin-top:12px;font-size:11px;color:var(--muted);text-align:center}
+.right-stack{display:flex;flex-direction:column;gap:10px}
+.levels{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:13px}
+.level{height:6px;background:#152734}
+.level.on:nth-child(1){background:var(--yellow)}
+.level.on:nth-child(2){background:var(--orange)}
+.level.on:nth-child(3){background:#ff654f}
+.level.on:nth-child(4){background:var(--red)}
+#chart{width:100%;height:150px;display:block}
+.table{width:100%;border-collapse:collapse;font-size:11px}
+.table th,.table td{text-align:left;padding:8px 4px;border-bottom:1px solid #102938}
+.table th{color:var(--muted);font-weight:normal}
+.footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+ border-top:1px solid var(--line);padding:10px 4px;color:var(--muted);font-size:10px}
+.color0{color:var(--green)}.color1{color:var(--yellow)}
+.color2{color:var(--orange)}.color3{color:#ff654f}.color4{color:var(--red)}
+@media(max-width:1050px){.layout{grid-template-columns:1fr 1fr}.radar-panel{grid-column:1/-1;grid-row:1}
+ .radar{width:min(70vw,390px)}}
+@media(max-width:650px){#app{padding:7px}.layout{grid-template-columns:1fr}
+ .radar-panel{grid-column:auto;grid-row:auto}.header-right{justify-content:flex-end}
+ header{align-items:flex-start}.brand{letter-spacing:2px}.panel{padding:11px}}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+ <div>
+  <div class="brand">SEISMIC CORE X</div>
+  <div class="subtitle">VIBRATION MONITORING SYSTEM // REAL TIME</div>
+ </div>
+ <div class="header-right">
+  <div class="pill online" id="connection">● CONECTANDO</div>
+  <button class="btn" onclick="activarSonido()">ACTIVAR AUDIO</button>
+  <button class="btn" onclick="document.documentElement.requestFullscreen?.()">PANTALLA COMPLETA</button>
+ </div>
+</header>
 
-* { box-sizing: border-box; }
+<div class="layout">
+ <section class="panel">
+  <div class="heading">01 // ESTADO DEL SISTEMA</div>
+  <div class="small">ESTADO ACTUAL</div>
+  <div class="status" id="status">ESPERANDO SENSOR</div>
+  <div class="levels">
+   <div class="level"></div><div class="level"></div>
+   <div class="level"></div><div class="level"></div>
+  </div>
+  <div class="metrics">
+   <div class="metric"><div class="small">MAGNITUD</div><div class="value" id="mag">0.000</div><div class="unit">UNIDADES DEL SENSOR</div></div>
+   <div class="metric"><div class="small">SEÑAL FILTRADA</div><div class="value" id="filtered">0.000</div><div class="unit">PROMEDIO MOVIL</div></div>
+   <div class="metric"><div class="small">DURACION</div><div class="value" id="duration">0.0 s</div><div class="unit">EVENTO ACTUAL</div></div>
+   <div class="metric"><div class="small">PAQUETES</div><div class="value" id="packets">0</div><div class="unit">RECIBIDOS</div></div>
+  </div>
+  <div class="metric" style="margin-top:8px">
+   <div class="small">INTENSIDAD RELATIVA</div>
+   <div class="bar"><div id="bar"></div></div>
+   <div class="small" id="intensity" style="margin-top:7px">0 %</div>
+  </div>
+  <div class="metrics">
+   <div class="metric"><div class="small">EJE X</div><div class="value" id="x">0.000</div></div>
+   <div class="metric"><div class="small">EJE Y</div><div class="value" id="y">0.000</div></div>
+   <div class="metric"><div class="small">EJE Z</div><div class="value" id="z">0.000</div></div>
+   <div class="metric"><div class="small">DIRECCION</div><div class="value" id="direction" style="font-size:14px">--</div></div>
+  </div>
+ </section>
 
-html, body {
-    margin: 0;
-    width: 100%;
-    min-height: 100%;
-    background: var(--bg);
-    color: #d5ffe3;
-    font-family: Consolas, "Courier New", monospace;
+ <section class="panel radar-panel">
+  <div class="heading" style="align-self:flex-start">02 // RADAR DE ACTIVIDAD</div>
+  <div class="radar" id="radar">
+   <div class="cross h"></div><div class="cross v"></div>
+   <div class="event-point" id="point"></div>
+  </div>
+  <div class="radar-label" id="radarText">ESCANEANDO AREA // SISTEMA EN ESPERA</div>
+  <div class="metrics" style="width:100%">
+   <div class="metric"><div class="small">ULTIMO EVENTO</div><div class="value" id="lastEvent" style="font-size:18px">NINGUNO</div></div>
+   <div class="metric"><div class="small">REGISTRO</div><div class="value" id="eventCount" style="font-size:18px">0</div></div>
+  </div>
+ </section>
+
+ <div class="right-stack">
+  <section class="panel">
+   <div class="heading">03 // TRAZA DE VIBRACION</div>
+   <canvas id="chart"></canvas>
+   <div class="small">HISTORIAL RECIENTE // ACTUALIZACION AUTOMATICA</div>
+  </section>
+  <section class="panel" style="flex:1">
+   <div class="heading">04 // REGISTRO DE EVENTOS</div>
+   <table class="table">
+    <thead><tr><th>HORA</th><th>EVENTO</th><th>MAX.</th><th>SEG.</th></tr></thead>
+    <tbody id="events"><tr><td colspan="4">ESPERANDO EVENTOS...</td></tr></tbody>
+   </table>
+  </section>
+ </div>
+</div>
+
+<div class="footer">
+ <span>SEISMIC CORE X // MONITOREO EXPERIMENTAL</span>
+ <span id="updated">ACTUALIZACION: --</span>
+ <span>RADAR ACTIVO // <span id="audioStatus">AUDIO DESACTIVADO</span></span>
+</div>
+</div>
+
+<script>
+let audioCtx=null, audioEnabled=false, lastLevel=0, lastSweep=0;
+let lastRevolution=0, lastEventState=false, lastEventSignature="";
+let lastData=null, eventCount=0, pointX=50, pointY=50;
+let points=[], sweepStart=performance.now();
+
+function activarSonido(){
+ try{
+  audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+  audioCtx.resume();
+  audioEnabled=true;
+  document.getElementById("audioStatus").textContent="AUDIO ACTIVADO";
+  bip(680,0.07,0.035);
+ }catch(e){
+  document.getElementById("audioStatus").textContent="AUDIO NO DISPONIBLE";
+ }
 }
-
-body {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow-x: hidden;
+function tono(freq,duration,gain=0.045,type="sine"){
+ if(!audioEnabled||!audioCtx)return;
+ const osc=audioCtx.createOscillator(), vol=audioCtx.createGain();
+ osc.type=type;osc.frequency.value=freq;
+ vol.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+ vol.gain.exponentialRampToValueAtTime(gain,audioCtx.currentTime+0.01);
+ vol.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+duration);
+ osc.connect(vol);vol.connect(audioCtx.destination);
+ osc.start();osc.stop(audioCtx.currentTime+duration+0.02);
 }
-
-body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    opacity: .10;
-    background: repeating-linear-gradient(
-        0deg,
-        transparent 0,
-        transparent 3px,
-        rgba(0,255,120,.11) 4px
-    );
+function bip(freq=900,duration=0.055,gain=0.025){tono(freq,duration,gain,"sine")}
+function sonidoNivel(n){
+ if(n===1)bip(540,0.09,0.025);
+ if(n===2){tono(620,0.13,0.035);setTimeout(()=>tono(780,0.12,0.03),130)}
+ if(n===3){tono(820,0.18,0.05,"triangle");setTimeout(()=>tono(640,0.2,0.045,"triangle"),220)}
+ if(n>=4){tono(950,0.22,0.055,"sawtooth");setTimeout(()=>tono(720,0.22,0.05,"sawtooth"),250);setTimeout(()=>tono(950,0.22,0.05,"sawtooth"),500)}
 }
-
-header, main, footer { position: relative; z-index: 1; }
-
-header {
-    min-height: 78px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 15px 25px;
-    background: linear-gradient(90deg, #020b05, #07180c, #020804);
-    border-bottom: 1px solid var(--green);
-    box-shadow: 0 0 24px rgba(0,255,120,.10);
+function colorNivel(n){
+ return ["#35ffb0","#ffd45a","#ff8c42","#ff654f","#ff3e5d"][Math.max(0,Math.min(4,n))];
 }
-
-.brand {
-    display: flex;
-    align-items: center;
-    gap: 15px;
+function moverPunto(data){
+ const point=document.getElementById("point");
+ if(!data.evento_activo){point.classList.remove("active");return}
+ if(!point.classList.contains("active")){
+  pointX=32+Math.random()*36;pointY=32+Math.random()*36;
+ }
+ point.classList.add("active");
+ point.style.left=pointX+"%";point.style.top=pointY+"%";
+ point.style.background=colorNivel(data.nivel||0);
+ point.style.color=colorNivel(data.nivel||0);
+ point.style.boxShadow="0 0 18px "+colorNivel(data.nivel||0);
 }
-
-.logo {
-    width: 43px;
-    height: 43px;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--green);
-    color: var(--green);
-    font-size: 23px;
-    transform: rotate(45deg);
-    box-shadow: 0 0 16px rgba(0,255,120,.17);
+function actualizar(data){
+ lastData=data;
+ document.getElementById("connection").textContent="● "+(data.calibrando?"CALIBRANDO":"SENSOR EN LINEA");
+ document.getElementById("connection").style.color=data.calibrando?"#ffd45a":"#35ffb0";
+ const n=data.nivel||0;
+ const status=document.getElementById("status");
+ status.textContent=data.estado||"SIN DATOS";
+ status.className="status color"+n;
+ document.getElementById("mag").textContent=(data.magnitud||0).toFixed(4);
+ document.getElementById("filtered").textContent=(data.filtrada||0).toFixed(4);
+ document.getElementById("duration").textContent=(data.duracion||0).toFixed(1)+" s";
+ document.getElementById("packets").textContent=data.contador||0;
+ document.getElementById("x").textContent=(data.x||0).toFixed(3);
+ document.getElementById("y").textContent=(data.y||0).toFixed(3);
+ document.getElementById("z").textContent=(data.z||0).toFixed(3);
+ document.getElementById("direction").textContent=data.direccion||"--";
+ document.getElementById("lastEvent").textContent=data.ultimo_evento||"NINGUNO";
+ const intensity=Math.min(100,Math.max(0,(data.filtrada||0)/UMBRAL_VISUAL*100));
+ document.getElementById("bar").style.width=intensity+"%";
+ document.getElementById("bar").style.background=colorNivel(n);
+ document.getElementById("intensity").textContent=intensity.toFixed(1)+" %";
+ document.querySelectorAll(".level").forEach((el,i)=>el.classList.toggle("on",i<n));
+ document.getElementById("radarText").textContent=data.evento_activo?
+  "EVENTO ACTIVO // NIVEL "+n:"ESCANEANDO AREA // SISTEMA EN ESPERA";
+ moverPunto(data);
+ document.getElementById("updated").textContent="ACTUALIZACION: "+new Date().toLocaleTimeString();
+ points=(data.historial||[]).map(v=>v.v);
+ dibujarGrafico();
+ pintarEventos(data.eventos||[]);
+ document.getElementById("eventCount").textContent=(data.eventos||[]).length;
+ if(n>lastLevel && n>0)sonidoNivel(n);
+ lastLevel=n;
 }
-
-.logo span { transform: rotate(-45deg); }
-
-.title {
-    font-size: clamp(19px, 2vw, 29px);
-    font-weight: 900;
-    letter-spacing: .15em;
-    color: var(--green);
-    text-shadow: 0 0 17px rgba(0,255,120,.5);
+const UMBRAL_VISUAL=0.12;
+function pintarEventos(ev){
+ const tbody=document.getElementById("events");
+ if(!ev.length){tbody.innerHTML='<tr><td colspan="4">ESPERANDO EVENTOS...</td></tr>';return}
+ tbody.innerHTML=ev.slice(0,8).map(e=>
+ `<tr><td>${esc(e.hora)}</td><td style="color:${colorNivel(e.nivel)}">${esc(e.estado)}</td><td>${Number(e.maximo).toFixed(3)}</td><td>${Number(e.duracion).toFixed(1)}</td></tr>`
+ ).join("");
 }
-
-.subtitle {
-    color: var(--muted);
-    font-size: 10px;
-    letter-spacing: .22em;
-    margin-top: 5px;
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function dibujarGrafico(){
+ const c=document.getElementById("chart"),ctx=c.getContext("2d");
+ const rect=c.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+ c.width=rect.width*dpr;c.height=rect.height*dpr;
+ ctx.scale(dpr,dpr);
+ const w=rect.width,h=rect.height;
+ ctx.clearRect(0,0,w,h);
+ ctx.strokeStyle="#12384b";ctx.lineWidth=1;
+ for(let i=1;i<5;i++){ctx.beginPath();ctx.moveTo(0,h*i/5);ctx.lineTo(w,h*i/5);ctx.stroke()}
+ if(points.length<2)return;
+ const max=Math.max(0.15,...points);
+ ctx.beginPath();
+ points.forEach((v,i)=>{
+  const x=i*w/(points.length-1),y=h-8-(v/max)*(h-16);
+  i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+ });
+ ctx.strokeStyle="#00eaff";ctx.lineWidth=2;ctx.shadowBlur=8;ctx.shadowColor="#00eaff";ctx.stroke();ctx.shadowBlur=0;
 }
-
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 22px;
+async function consultar(){
+ try{
+  const r=await fetch("/estado",{cache:"no-store"});
+  if(!r.ok)throw Error("HTTP "+r.status);
+  actualizar(await r.json());
+ }catch(e){
+  document.getElementById("connection").textContent="● SIN CONEXION";
+  document.getElementById("connection").style.color="#ff3e5d";
+ }
 }
+setInterval(consultar,500);
+consultar();
+window.addEventListener("resize",dibujarGrafico);
 
-.clock {
-    font-size: 21px;
-    font-weight: bold;
-    letter-spacing: .08em;
-    color: var(--green2);
+// Bip al completar cada vuelta del radar.
+function animarRadar(t){
+ const vuelta=Math.floor((t-sweepStart)/5000);
+ if(vuelta!==lastRevolution){
+  lastRevolution=vuelta;
+  bip(1050,0.055,0.022);
+ }
+ requestAnimationFrame(animarRadar);
 }
+requestAnimationFrame(animarRadar);
+</script>
+</body>
+</html>
+"""
 
-.connection {
-    border: 1px solid var(--border);
-    padding: 10px 13px;
-    font-size: 10px;
-    letter-spacing: .1em;
-    color: var(--green);
-    background: rgba(0,255,120,.05);
-}
-
-.connection::before {
-    content: "●";
-    margin-right: 8px;
-}
-
-.connection.offline {
-    color: var(--orange);
-    border-color: rgba(255,140,50,.5);
-}
-
-.connection.offline::before { color: var(--orange); }
-
-main {
-    flex: 1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 315px;
-    grid-template-rows: minmax(420px, 1fr) auto;
-    gap: 13px;
-    padding: 14px;
-}
-
-.panel {
-    min-width: 0;
-    border: 1px solid var(--border);
-    background: var(--panel);
-    box-shadow: inset 0 0 25px rgba(0,255,120,.025);
-    position: relative;
-}
-
-.panel::before {
-    content: "";
-    position: absolute;
-    top: -1px;
-    left: 18px;
-    width: 65px;
-    height: 2px;
-    background: var(--green);
-    box-shadow: 0 0 10px var(--green);
-}
-
-.panel-title {
-    font-size: 11px;
-    color: var(--green);
-    letter-spacing: .16em;
-    padding: 15px 16px 10px;
-    border-bottom: 1px solid rgba(0,255,120,.12);
-}
-
-.radar-panel {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-}
-
-.radar-meta {
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    color: var(--muted);
-    font-size: 10px;
-    padding: 11px 16px;
-}
-
-.radar-stage {
-    flex: 1;
-    min-height: 350px;
-    display: grid;
-    place-items: center;
-    padding: 12px;
-    position: relative;
-    overflow: hidden;
-    background:
-        radial-gradient(ellipse at center, rgba(0,255,120,.06), transparent 66%);
-}
-
-.radar {
-    position: relative;
-    width: min( min(70vw, 72vh), 690px);
-    aspect-ratio: 1;
-    max-width: 100%;
-    border-radius: 50%;
-    border: 1px solid rgba(0,255,120,.65);
-    overflow: hidden;
-    background:
-        radial-gradient(circle, transparent 0 14%, rgba(0,255,120,.08) 14.2%, transparent 14.6%),
-        radial-gradient(circle, transparent 0 29%, rgba(0,255,120,.15) 29.2%, transparent 29.6%),
-        radial-gradient(circle, transparent 0 44%, rgba(0,255,120,.18) 44.2%, transparent 44.6%),
-        radial-gradient(circle, transparent 0 59%, rgba(0,255,120,.22) 59.2%, transparent 59.6%),
-        radial-gradient(circle, rgba(0,255,120,.035), rgba(0,0,0,.7));
-    box-shadow: 0 0 35px rgba(0,255,120,.08), inset 0 0 40px rgba(0,255,120,.06);
-}
-
-.radar::before, .radar::after {
-    content: "";
-    position: absolute;
-    background: rgba(0,255,120,.22);
-    pointer-events: none;
-}
-
-.radar::before {
-    width: 1px;
-    height: 100%;
-    left: 50%;
-}
-
-.radar::after {
-    height: 1px;
-    width: 100%;
-    top: 50%;
-}
-
-.axis {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 100%;
-    height: 1px;
-    background: rgba(0,255,120,.09);
-}
-
-.axis.a { transform: rotate(45deg); }
-.axis.b { transform: rotate(-45deg); }
-
-.sweep {
-    position: absolute;
-    width: 50%;
-    height: 2px;
-    left: 50%;
-    top: 50%;
-    transform-origin: left center;
-    background: linear-gradient(90deg, var(--green), transparent);
-    box-shadow: 0 0 8px var(--green);
-    z-index: 4;
-}
-
-.sweep::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: -115px;
-    width: 100%;
-    height: 230px;
-    background: linear-gradient(0deg, transparent, rgba(0,255,120,.025));
-    transform: rotate(-12deg);
-    transform-origin: left center;
-}
-
-.radar-center {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 8
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
