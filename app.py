@@ -7,6 +7,52 @@ import os
 
 app = Flask(__name__)
 
+import json
+import urllib.request
+import urllib.error
+
+def enviar_correo_brevo(destinatarios, asunto, mensaje):
+    api_key = os.environ.get("BREVO_API_KEY")
+
+    if not api_key:
+        return False, "Falta BREVO_API_KEY en Render"
+
+    datos = {
+        "sender": {
+            "name": "SISMO EN CURSO",
+            "email": "sismoencurso@gmail.com"
+        },
+        "to": [
+            {"email": correo}
+            for correo in destinatarios
+        ],
+        "subject": asunto,
+        "htmlContent": mensaje
+    }
+
+    solicitud = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(datos).encode("utf-8"),
+        headers={
+            "api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(solicitud, timeout=20) as respuesta:
+            return respuesta.status in (200, 201, 202), respuesta.read().decode("utf-8")
+
+    except urllib.error.HTTPError as error:
+        detalle = error.read().decode("utf-8", errors="replace")
+        return False, f"Brevo HTTP {error.code}: {detalle}"
+
+    except Exception as error:
+        return False, str(error)
+
+
 # =========================================================
 # SEISMIC CORE X - CONFIGURACION
 # =========================================================
