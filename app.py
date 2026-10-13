@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify, Response
 from collections import deque
 from threading import Lock, Thread
@@ -32,12 +31,19 @@ evento_activo = alerta_critica = precursor_enviado = critica_enviada = False
 ultimo_envio = {'tipo': None, 'ok': None, 'detalle': 'Aún no se ha enviado ninguna alerta', 'hora': None}
 
 
+# Destinatario predeterminado para que el sistema funcione sin configurar ALERTAS_EMAILS.
+# Si ALERTAS_EMAILS está definida con direcciones válidas en Render, esas direcciones tienen prioridad.
+DESTINATARIO_PREDETERMINADO = 'edwin.rojas.hansen@gmail.com'
+
+
 def obtener_destinatarios():
     correos = []
     for parte in os.environ.get('ALERTAS_EMAILS', '').split(','):
         correo = parte.strip()
         if correo and '@' in correo and '.' in correo.rsplit('@', 1)[-1] and correo.lower() not in [c.lower() for c in correos]:
             correos.append(correo)
+    if not correos:
+        correos.append(DESTINATARIO_PREDETERMINADO)
     return correos
 
 
@@ -46,7 +52,7 @@ def enviar_correo_brevo(destinatarios, asunto, mensaje):
     if not api_key:
         return False, 'Falta BREVO_API_KEY en Render'
     if not destinatarios:
-        return False, 'No hay destinatarios válidos en ALERTAS_EMAILS'
+        return False, 'No hay destinatarios válidos configurados'
     payload = {
         'sender': {'name': 'SEISMIC CORE X', 'email': 'sismoencurso@gmail.com'},
         'to': [{'email': c} for c in destinatarios],
@@ -80,8 +86,8 @@ def enviar_alerta_async(tipo, asunto, cantidad, cuerpo):
     def trabajo():
         destinatarios = obtener_destinatarios()
         if not destinatarios:
-            registrar_envio(tipo, False, 'Configura ALERTAS_EMAILS en Render')
-            app.logger.error('Alerta %s no enviada: falta ALERTAS_EMAILS', tipo)
+            registrar_envio(tipo, False, 'No hay destinatarios válidos configurados')
+            app.logger.error('Alerta %s no enviada: no hay destinatarios válidos', tipo)
             return
         resultados, todo_ok = [], True
         for i in range(cantidad):
