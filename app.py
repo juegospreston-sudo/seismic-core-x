@@ -54,7 +54,7 @@ def enviar_correo_brevo(destinatarios, asunto, mensaje):
     if not destinatarios:
         return False, 'No hay destinatarios válidos configurados'
     payload = {
-        'sender': {'name': 'SEISMIC CORE X', 'email': 'sismoencurso@gmail.com'},
+        'sender': {'name': 'Monitor Sísmico', 'email': 'sismoencurso@gmail.com'},
         'to': [{'email': c} for c in destinatarios],
         'subject': asunto, 'htmlContent': mensaje
     }
