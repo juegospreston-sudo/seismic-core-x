@@ -54,7 +54,7 @@ def enviar_correo_brevo(destinatarios, asunto, mensaje):
     if not destinatarios:
         return False, 'No hay destinatarios válidos configurados'
     payload = {
-        'sender': {'name': 'Monitor Sísmico', 'email': 'sismoencurso@gmail.com'},
+        'sender': {'name': 'MONITOR SÍSMICO', 'email': 'sismoencurso@gmail.com'},
         'to': [{'email': c} for c in destinatarios],
         'subject': asunto, 'htmlContent': mensaje
     }
@@ -152,7 +152,7 @@ def actualizar_estado(valor, datos):
         if ahora - inicio_movimiento_sostenido >= TIEMPO_PRECURSOR and not precursor_enviado:
             precursor_enviado = True
             cuerpo = html_alerta('MOVIMIENTO SOSTENIDO', magnitud, filtrada, duracion_evento, 'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA')
-            enviar_alerta_async('MOVIMIENTO_SOSTENIDO', 'SEISMIC CORE X — AVISO DE MOVIMIENTO SOSTENIDO', 2, cuerpo)
+            enviar_alerta_async('MOVIMIENTO_SOSTENIDO', 'POSIBLE SISMO EN PROGRESO — MOVIMIENTO SOSTENIDO', 2, cuerpo)
     elif filtrada < UMBRAL_TEMBLOR:
         inicio_movimiento_sostenido = 0.0
 
@@ -161,7 +161,7 @@ def actualizar_estado(valor, datos):
         if not critica_enviada:
             critica_enviada = True
             cuerpo = html_alerta('ALERTA CRITICA', magnitud, filtrada, duracion_evento, 'ALERTA CRITICA')
-            enviar_alerta_async('CRITICA', 'SEISMIC CORE X — ALERTA CRÍTICA', 1, cuerpo)
+            enviar_alerta_async('CRITICA', 'ALERTA CRÍTICA — ACTIVIDAD SÍSMICA INTENSA', 1, cuerpo)
         return
     if filtrada >= UMBRAL_TEMBLOR:
         if alerta_critica and ahora - ultima_actividad < TIEMPO_ESTABLE_ALERTA:
@@ -245,7 +245,7 @@ def probar_correo():
     token = os.environ.get('ADMIN_TOKEN')
     if token and request.headers.get('X-Admin-Token') != token:
         return jsonify({'ok': False, 'error': 'No autorizado'}), 401
-    ok, detalle = enviar_correo_brevo(obtener_destinatarios(), 'SEISMIC CORE X — prueba de correo',
+    ok, detalle = enviar_correo_brevo(obtener_destinatarios(), 'PRUEBA DE CORREO — MONITOR SÍSMICO',
         '<h2>Prueba de correo</h2><p>Prueba de envío de SEISMIC CORE X mediante Brevo. No es una alerta sísmica.</p>')
     registrar_envio('PRUEBA', ok, detalle)
     return jsonify({'ok': ok, 'destinatarios': len(obtener_destinatarios()), 'detalle': detalle}), (200 if ok else 502)
