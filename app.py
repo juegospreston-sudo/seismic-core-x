@@ -12,7 +12,7 @@ UMBRAL_ALERTA = 0.120
 UMBRAL_ESTABLE = 0.010
 TIEMPO_ESTABLE_ALERTA = 5.0
 TIEMPO_FIN_EVENTO = 1.0
-TIEMPO_PRECURSOR = 5.0
+TIEMPO_PRECURSOR = 3.0
 MUESTRAS_FILTRO = 5
 MUESTRAS_CALIBRACION = 100
 
@@ -79,7 +79,7 @@ def registrar_envio(tipo, ok, detalle):
 
 def html_alerta(tipo, valor, valor_filtrado, duracion, estado_alerta):
     color = '#ff355e' if 'CRITICA' in tipo.upper() else '#ff984a'
-    return f'''<!doctype html><html lang="es"><body style="background:#07111b;color:#d7f8ff;font-family:Arial,sans-serif;padding:24px"><div style="max-width:650px;margin:auto;border:1px solid {color};padding:24px;background:#0a1b28"><h1 style="color:#00eaff">SEISMIC CORE X</h1><h2 style="color:{color}">{html.escape(tipo)}</h2><p><b>Estado:</b> {html.escape(estado_alerta)}</p><p><b>Magnitud recibida:</b> {valor:.6f}</p><p><b>Señal filtrada:</b> {valor_filtrado:.6f}</p><p><b>Duración:</b> {duracion:.2f} s</p><p>Hora: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}</p><hr><small>Monitor experimental de vibraciones; no es una predicción sísmica ni una alerta oficial.</small></div></body></html>'''
+    return f'''<!doctype html><html lang="es"><body style="background:#07111b;color:#d7f8ff;font-family:Arial,sans-serif;padding:24px"><div style="max-width:650px;margin:auto;border:1px solid {color};padding:24px;background:#0a1b28"><h1 style="color:#00eaff">SENSOR ACTIVO</h1><p style="color:#79aabb;letter-spacing:2px">MONITOREO EN CURSO · SEISMIC CORE X</p><h2 style="color:{color}">{html.escape(tipo)}</h2><p><b>Estado:</b> {html.escape(estado_alerta)}</p><p><b>Magnitud recibida:</b> {valor:.6f}</p><p><b>Señal filtrada:</b> {valor_filtrado:.6f}</p><p><b>Duración:</b> {duracion:.2f} s</p><p>Hora: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}</p><hr><small>Monitor experimental de vibraciones; no es una predicción sísmica ni una alerta oficial.</small></div></body></html>'''
 
 
 def enviar_alerta_async(tipo, asunto, cantidad, cuerpo):
@@ -145,15 +145,18 @@ def actualizar_estado(valor, datos):
         maximo_evento = max(maximo_evento, filtrada)
         duracion_evento = max(0.0, ahora - inicio_evento)
 
-    # Aviso de movimiento sostenido: no representa una predicción sísmica.
-    if evento_activo and filtrada >= UMBRAL_TEMBLOR and filtrada < UMBRAL_ALERTA:
+    # Aviso de movimiento sostenido tras 3 s por encima del umbral de temblor.
+    # También se evalúa si la señal alcanza el umbral crítico: la alerta crítica
+    # se envía inmediatamente y el aviso sostenido se envía al cumplir 3 s.
+    # Esto describe vibración observada; no predice un sismo.
+    if evento_activo and filtrada >= UMBRAL_TEMBLOR:
         if inicio_movimiento_sostenido == 0.0:
             inicio_movimiento_sostenido = ahora
         if ahora - inicio_movimiento_sostenido >= TIEMPO_PRECURSOR and not precursor_enviado:
             precursor_enviado = True
             cuerpo = html_alerta('MOVIMIENTO SOSTENIDO', magnitud, filtrada, duracion_evento, 'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA')
-            enviar_alerta_async('MOVIMIENTO_SOSTENIDO', 'POSIBLE SISMO EN PROGRESO — MOVIMIENTO SOSTENIDO', 2, cuerpo)
-    elif filtrada < UMBRAL_TEMBLOR:
+            enviar_alerta_async('MOVIMIENTO_SOSTENIDO', 'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA', 2, cuerpo)
+    else:
         inicio_movimiento_sostenido = 0.0
 
     if filtrada >= UMBRAL_ALERTA:
