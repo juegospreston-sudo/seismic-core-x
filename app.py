@@ -538,15 +538,16 @@ main{padding:16px;max-width:1800px;margin:auto}
 .panel{position:relative;background:linear-gradient(145deg,rgba(12,29,43,.96),rgba(5,15,25,.96));border:1px solid #203d4d;border-radius:13px;padding:17px;min-width:0;box-shadow:0 12px 35px #0003,inset 0 1px #ffffff08}
 .panel:before{content:'';position:absolute;top:-1px;left:15px;width:66px;border-top:2px solid var(--cyan);opacity:.8}
 .heading{font-size:10px;color:#9dc8d8;letter-spacing:2px;margin-bottom:16px;font-weight:700}
-.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(5,28,22,.92);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
+.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(3,15,12,.95);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
 #mapa{position:absolute;inset:0;z-index:1;background:#03120d;isolation:isolate;border-radius:50%;overflow:hidden}
-#mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 35% 30%,rgba(63,245,176,.18) 0%,transparent 55%),radial-gradient(ellipse at 70% 70%,rgba(100,232,255,.12) 0%,transparent 65%),linear-gradient(145deg,rgba(4,38,28,.15),rgba(1,14,10,.35));mix-blend-mode:screen}
-#mapa .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(1.35) contrast(2.3) saturate(1.7);opacity:.99}
+#mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 40% 40%,rgba(63,245,176,.12) 0%,transparent 60%),linear-gradient(145deg,rgba(2,24,18,.25),rgba(0,8,6,.55));mix-blend-mode:screen}
+/* Nuevos colores optimizados: aspecto táctico oscuro tecnológico, sin inversiones agresivas, tonos esmeralda y cian elegantes */
+#mapa .leaflet-tile-pane{filter:invert(0.92) hue-rotate(185deg) brightness(0.75) contrast(1.6) saturate(1.3);opacity:.94}
 #radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent;pointer-events:none}
 .leaflet-container{background:#03120d!important}
 .leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
 .leaflet-control-attribution a{color:#81e9d0!important}
-.street-text-label{background:transparent;border:none;box-shadow:none;color:#ffffff;font:700 11px Inter,Arial,sans-serif;letter-spacing:.8px;text-shadow:0 0 5px #000,0 0 9px #000,0 0 12px #39ff9b;white-space:nowrap}
+.street-text-label{background:transparent;border:none;box-shadow:none;color:#d7f8ff;font:700 11px Inter,Arial,sans-serif;letter-spacing:.8px;text-shadow:0 0 5px #000,0 0 9px #000,0 0 12px #39ff9b;white-space:nowrap}
 .radar-label{text-align:center;color:#c8eee7;font-size:12px;font-weight:700;margin-top:17px;letter-spacing:1.8px;text-shadow:0 0 14px rgba(45,220,180,.16)}
 .status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}
 .level2{color:var(--yellow)!important;border-color:var(--yellow)!important}
@@ -658,7 +659,7 @@ const mapa=L.map('mapa',{
     doubleClickZoom:false,
     touchZoom:false,
     keyboard:false
-}).setView([-33.4937,-70.7474],15); // Zoom ajustado a 15 para abarcar más área geográfica
+}).setView([-33.4937,-70.7474],15);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
