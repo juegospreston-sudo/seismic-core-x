@@ -243,7 +243,7 @@ def probar_correo():
 PAGINA = r'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SEISMIC CORE X</title>
 <style>
 :root{--bg:#050b12;--panel:rgba(7,18,29,.94);--line:#1b3949;--cyan:#64e8ff;--green:#63f5b0;--yellow:#ffd66b;--orange:#ffad70;--red:#ff5874;--muted:#8299a8}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 48% 0%,#102637 0%,#07111c 48%,#03070d 100%);color:#e5f2f7;font-family:Inter,Segoe UI,Arial,sans-serif}body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.035;background:repeating-linear-gradient(transparent 0 4px,rgba(100,232,255,.18) 5px);z-index:5}header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:19px 26px;border-bottom:1px solid #203c4b;background:rgba(3,10,17,.92);box-shadow:0 8px 30px #0005}.logo{color:var(--cyan);font-size:clamp(22px,3vw,35px);font-weight:750;letter-spacing:3px;text-shadow:0 0 22px #00bfff33}.sub{color:#8da6b5;font-size:10px;letter-spacing:2px;margin-top:6px}.connection{font-size:12px;color:var(--yellow);text-align:right}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--yellow);margin-right:7px;box-shadow:0 0 10px currentColor}main{padding:16px;max-width:1800px;margin:auto}.grid{display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(300px,1fr) minmax(260px,.8fr);gap:14px}.panel{position:relative;background:linear-gradient(145deg,rgba(12,29,43,.96),rgba(5,15,25,.96));border:1px solid #203d4d;border-radius:13px;padding:17px;min-width:0;box-shadow:0 12px 35px #0003,inset 0 1px #ffffff08}.panel:before{content:'';position:absolute;top:-1px;left:15px;width:66px;border-top:2px solid var(--cyan);opacity:.8}.heading{font-size:10px;color:#9dc8d8;letter-spacing:2px;margin-bottom:16px;font-weight:700}
-.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:radial-gradient(circle, #061824 0%, #02080e 100%);border:1px solid rgba(99,245,176,.48);box-shadow:0 0 0 7px #0a1720,0 0 0 8px #1c3c48,0 0 40px #38d99a15,inset 0 0 35px #0009}
+.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:radial-gradient(circle, #051520 0%, #02070c 100%);border:1px solid rgba(99,245,176,.48);box-shadow:0 0 0 7px #0a1720,0 0 0 8px #1c3c48,0 0 40px #38d99a15,inset 0 0 35px #0009}
 #radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent}
 .radar-label{text-align:center;color:#d2e8ef;font-size:12px;font-weight:700;margin-top:17px;letter-spacing:1.7px}.status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}.level2{color:var(--yellow)!important;border-color:var(--yellow)!important}.level3{color:var(--orange)!important;border-color:var(--orange)!important}.level4{color:var(--red)!important;border-color:var(--red)!important;animation:blink .7s infinite}.offline{color:var(--muted)!important;border-color:var(--muted)!important}@keyframes blink{50%{opacity:.48}}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px}.metric{background:#000a14b3;border:1px solid #103346;padding:12px 10px;min-height:83px}.label{color:var(--muted);font-size:10px;letter-spacing:1px}.value{color:var(--cyan);font-size:clamp(20px,2.4vw,29px);margin-top:10px}.unit{color:var(--muted);font-size:10px}.bar{height:7px;background:#102c3b;margin-top:9px}.bar-inner{height:100%;width:0;background:var(--cyan);transition:width .25s}.info-row{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #123040;font-size:11px}.info-row span:first-child{color:var(--muted)}.info-row span:last-child{text-align:right;overflow-wrap:anywhere}.clock-panel{display:flex;align-items:center;justify-content:center;gap:16px;margin:13px auto 0;padding:12px;border:1px solid var(--line);background:#000a14b3;color:var(--muted);font-size:10px;letter-spacing:2px}.clock-panel strong{color:var(--cyan);font-size:clamp(20px,2.5vw,28px);letter-spacing:3px;text-shadow:0 0 12px #00eaff55;font-weight:600}#history{width:100%;height:100px;display:block;background:#03111b;border:1px solid #103346}.footer{color:#527d8c;font-size:10px;text-align:center;padding:18px 5px 8px;letter-spacing:1px}@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.side{grid-column:1/-1}}@media(max-width:680px){header{align-items:flex-start;flex-direction:column}.connection{text-align:left}.grid{grid-template-columns:1fr}.side{grid-column:auto}main{padding:8px}}
 </style></head><body><header><div><div class="logo">SEISMIC CORE X</div><div class="sub">EL SISTEMA ESTÁ DETECTANDO · TELEMETRÍA EN VIVO</div></div><div class="connection"><div><span class="dot" id="dot"></span><span id="conn">EN LÍNEA</span></div></div></header>
@@ -253,33 +253,39 @@ PAGINA = r'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta na
 <script>
 const $=id=>document.getElementById(id);
 const rc=$('radar').getContext('2d'),hc=$('history').getContext('2d');let angle=0,enabled=false,paused=false,audio=null,lastSweep=-1,level=1,mag=0,radarMag=0,history=Array(120).fill(0),lastStatus='';function color(l){return l>=4?'#ff355e':l===3?'#ff984a':l===2?'#ffe66d':'#39ff9b'}function beep(f=660,d=.08,v=.03){if(!enabled||paused)return;try{if(!audio)audio=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();let o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch(e){}}async function activarAudio(){if(enabled)return;try{audio=new(window.AudioContext||window.webkitAudioContext)();await audio.resume();enabled=true;paused=false;beep(880,.12,.045)}catch(e){enabled=false}}document.addEventListener('pointerdown',activarAudio,{once:true});document.addEventListener('keydown',activarAudio,{once:true});function radar(){let c=300,r=250;rc.clearRect(0,0,600,600);
-// Fondo de mapa entorno urbanizado (Maipú y alrededores) en capas transparentes y detalladas
+// Mapa vectorial geométrico real de manzanas, bloques y trazados urbanos de entorno
 rc.save();
-for(let a=0; a<Math.PI*2; a+=Math.PI/8){
-  rc.beginPath(); rc.moveTo(c, c);
-  rc.lineTo(c + Math.cos(a)*r*0.95, c + Math.sin(a)*r*0.95);
-  rc.strokeStyle='rgba(45,160,200,0.12)'; rc.lineWidth=1.5; rc.stroke();
+rc.fillStyle='#041018'; rc.beginPath(); rc.arc(c, c, r, 0, Math.PI*2); rc.fill();
+
+// Trazado realista de bloques urbanos (calles interconectadas y diagonales de Maipú)
+rc.strokeStyle='rgba(65,210,230,0.14)'; rc.lineWidth=1;
+for(let i=-260; i<=260; i+=28){
+  rc.beginPath(); rc.moveTo(c+i, c-260); rc.lineTo(c+i, c+260); rc.stroke();
+  rc.beginPath(); rc.moveTo(c-260, c+i); rc.lineTo(c+260, c+i); rc.stroke();
 }
-for(let rad=45; rad<=r; rad+=45){
-  rc.beginPath(); rc.arc(c, c, rad, 0, Math.PI*2);
-  rc.strokeStyle='rgba(70,230,190,0.15)'; rc.lineWidth=1; rc.stroke();
+// Arterias principales diagonales simulando rutas de conectividad real
+rc.strokeStyle='rgba(90,240,255,0.22)'; rc.lineWidth=2;
+rc.beginPath(); rc.moveTo(c-250, c-180); rc.lineTo(c+250, c+190); rc.stroke();
+rc.beginPath(); rc.moveTo(c-200, c+220); rc.lineTo(c+220, c-210); rc.stroke();
+
+// Detalles y nodos de manzanas periféricas
+for(let a=0; a<Math.PI*2; a+=Math.PI/6){
+  let dist=70;
+  while(dist<r){
+    let px = c + Math.cos(a)*dist + Math.sin(a*2)*12;
+    let py = c + Math.sin(a)*dist - Math.cos(a*2)*12;
+    rc.fillStyle='rgba(50,180,200,0.08)'; rc.fillRect(px-6, py-6, 12, 12);
+    dist+=60;
+  }
 }
-rc.strokeStyle='rgba(100,230,255,0.09)'; rc.lineWidth=1;
-for(let x=-250; x<=250; x+=35){
-  rc.beginPath(); rc.moveTo(c+x, c-250); rc.lineTo(c+x, c+250); rc.stroke();
-  rc.beginPath(); rc.moveTo(c-250, c+x); rc.lineTo(c+250, c+x); rc.stroke();
-}
-rc.fillStyle='rgba(130,180,200,0.45)'; rc.font='9px Inter, Arial, sans-serif'; rc.textAlign='center';
-rc.fillText('AV. PAJARITOS', c - 90, c - 110);
-rc.fillText('TRES NTE', c + 80, c - 70);
-rc.fillText('VILLA LOS HÉROES', c - 70, c + 95);
-rc.fillText('EL ROSAL', c + 100, c + 110);
 rc.restore();
 
+// Capa de radar y retícula de escaneo
 rc.strokeStyle='#39ff9b55';rc.lineWidth=1;for(let i=1;i<=4;i++){rc.beginPath();rc.arc(c,c,r*i/4,0,Math.PI*2);rc.stroke()}rc.beginPath();rc.moveTo(c-r,c);rc.lineTo(c+r,c);rc.moveTo(c,c-r);rc.lineTo(c,c+r);rc.stroke();let g=rc.createConicGradient(angle,c,c);g.addColorStop(0,'#39ff9b55');g.addColorStop(.18,'#39ff9b10');g.addColorStop(.25,'#39ff9b00');g.addColorStop(1,'#39ff9b00');rc.fillStyle=g;rc.beginPath();rc.moveTo(c,c);rc.arc(c,c,r,0,Math.PI*2);rc.fill();rc.strokeStyle='#39ff9b';rc.lineWidth=2;rc.beginPath();rc.moveTo(c,c);rc.lineTo(c+Math.cos(angle)*r,c+Math.sin(angle)*r);rc.stroke();
 
-rc.save();rc.shadowBlur=18;rc.shadowColor='#64e8ff';rc.fillStyle='#64e8ff';rc.beginPath();rc.arc(c,c,5.5,0,Math.PI*2);rc.fill();
-rc.font='700 10.5px Inter, Arial, sans-serif';rc.fillStyle='#e0ffff';rc.textAlign='center';rc.fillText('PUERTO CÁRDENAS',c,c-12);rc.restore();
+// Centro exacto: Puerto Cárdenas
+rc.save();rc.shadowBlur=20;rc.shadowColor='#64e8ff';rc.fillStyle='#64e8ff';rc.beginPath();rc.arc(c,c,6,0,Math.PI*2);rc.fill();
+rc.font='700 11px Inter, Arial, sans-serif';rc.fillStyle='#e0ffff';rc.textAlign='center';rc.fillText('PUERTO CÁRDENAS',c,c-12);rc.restore();
 
 if(radarMag>=.008){let p=Math.min(.88,Math.max(.12,radarMag/.2)),x=c+Math.cos(-.62)*r*p,y=c+Math.sin(-.62)*r*p;rc.save();rc.shadowBlur=24;rc.shadowColor=color(level);rc.fillStyle=color(level);rc.beginPath();rc.arc(x,y,level>=3?9:6,0,Math.PI*2);rc.fill();rc.restore()}angle+=.012;let b=Math.floor(angle/(2*Math.PI));if(b!==lastSweep){lastSweep=b;beep()}requestAnimationFrame(radar)}function graph(){hc.clearRect(0,0,700,180);hc.fillStyle='#03111b';hc.fillRect(0,0,700,180);hc.strokeStyle='#123040';for(let y=30;y<180;y+=30){hc.beginPath();hc.moveTo(0,y);hc.lineTo(700,y);hc.stroke()}hc.strokeStyle=color(level);hc.lineWidth=2;hc.beginPath();history.forEach((v,i)=>{let x=i*700/(history.length-1),y=172-Math.min(1,Math.abs(v)/.2)*164;i?hc.lineTo(x,y):hc.moveTo(x,y)});hc.stroke()}async function refresh(){try{let r=await fetch('/estado',{cache:'no-store'});if(!r.ok)throw Error(r.status);let d=await r.json(),on=!!d.conexion;$('conn').textContent=on?'EN LÍNEA':(d.conexion_texto||'SIN DATOS');$('dot').style.background=on?'#39ff9b':'#ff355e';$('network').textContent=on?'EN LÍNEA':'SIN COMUNICACIÓN';let s=$('status');s.textContent=d.estado||'ESPERANDO SENSOR';s.className='status';level=Number(d.nivel||1);if(!on)s.classList.add('offline');else if(level===2)s.classList.add('level2');else if(level===3)s.classList.add('level3');else if(level>=4)s.classList.add('level4');mag=Number(d.filtrada||0);radarMag=Number(d.actual??d.magnitud??0);$('mag').textContent=radarMag.toFixed(6);$('fil').textContent=mag.toFixed(6);$('lvl').textContent=level;$('events').textContent=d.eventos||0;$('cal').textContent=d.calibrando?'EN CURSO':'COMPLETADA';$('dir').textContent=d.direccion||'--';$('peak').textContent=Number(d.maximo_evento||0).toFixed(6);$('dur').textContent=Number(d.duracion_evento||0).toFixed(2)+' s';$('samples').textContent=d.muestras||0;$('age').textContent=d.tiempo_activo==null?'--':Number(d.tiempo_activo).toFixed(1)+' s';$('recipients').textContent=d.destinatarios_configurados??0;let m=d.correo||{};$('mail').textContent=m.tipo?(m.ok?'OK: ':'ERROR: ')+m.tipo:'SIN ENVÍOS';let p=Math.min(100,Math.max(0,mag/.2*100));$('pct').textContent=p.toFixed(1)+'%';$('bar').style.width=p+'%';$('bar').style.background=color(level);history.push(mag);if(history.length>120)history.shift();graph();if(lastStatus&&lastStatus!==d.estado&&enabled){if(level>=4)beep(180,.45,.12);else if(level===3)beep(300,.22,.08);else if(level===2)beep(460,.12,.05);else beep(720,.08,.025)}lastStatus=d.estado||''}catch(e){$('conn').textContent='ERROR DE CONEXIÓN';$('network').textContent='ERROR'}}$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false});setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false}),1000);setInterval(refresh,200);radar();graph();refresh();
 </script></body></html>'''
