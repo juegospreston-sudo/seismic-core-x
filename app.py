@@ -657,7 +657,7 @@ const mapa=L.map('mapa',{
     doubleClickZoom:false,
     touchZoom:false,
     keyboard:false
-}).setView([-33.4937,-70.7474],17);
+}).setView([-33.4937,-70.7474],18); // Zoom aumentado a 18 para mostrar nombres de pasajes cercanos
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
