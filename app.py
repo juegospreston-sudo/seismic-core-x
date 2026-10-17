@@ -5,7 +5,7 @@ import json, math, os, time, urllib.request, urllib.error, html
 
 app = Flask(__name__)
 
-# SEISMIC CORE X — umbrales experimentales
+# SEISMIC CORE X — umbrales experimentales originales
 UMBRAL_VIBRACION = 0.035
 UMBRAL_BRUSCO = 0.060
 UMBRAL_TEMBLOR = 0.060
@@ -20,21 +20,13 @@ MUESTRAS_CALIBRACION = 100
 lock = Lock()
 historial = deque(maxlen=MUESTRAS_FILTRO)
 inicio_servidor = time.time()
-ultimo_dato = 0.0
-ultima_actividad = 0.0
-inicio_evento = 0.0
-inicio_movimiento_sostenido = 0.0
-magnitud = filtrada = maximo_evento = duracion_evento = 0.0
-actual = 0.0
+ultimo_dato = ultima_actividad = inicio_evento = inicio_movimiento_sostenido = 0.0
+magnitud = filtrada = maximo_evento = duracion_evento = actual = 0.0
 nivel, estado, direccion = 1, 'ESPERANDO SENSOR', None
 calibrando = True
 muestras_recibidas = total_eventos = 0
 evento_activo = alerta_critica = precursor_enviado = critica_enviada = False
 ultimo_envio = {'tipo': None, 'ok': None, 'detalle': 'Aún no se ha enviado ninguna alerta', 'hora': None}
-
-
-# Destinatario predeterminado para que el sistema funcione sin configurar ALERTAS_EMAILS.
-# Si ALERTAS_EMAILS está definida con direcciones válidas en Render, esas direcciones tienen prioridad.
 DESTINATARIO_PREDETERMINADO = 'edwin.rojas.hansen@gmail.com'
 
 
@@ -44,9 +36,7 @@ def obtener_destinatarios():
         correo = parte.strip()
         if correo and '@' in correo and '.' in correo.rsplit('@', 1)[-1] and correo.lower() not in [c.lower() for c in correos]:
             correos.append(correo)
-    if not correos:
-        correos.append(DESTINATARIO_PREDETERMINADO)
-    return correos
+    return correos or [DESTINATARIO_PREDETERMINADO]
 
 
 def enviar_correo_brevo(destinatarios, asunto, mensaje):
@@ -55,11 +45,8 @@ def enviar_correo_brevo(destinatarios, asunto, mensaje):
         return False, 'Falta BREVO_API_KEY en Render'
     if not destinatarios:
         return False, 'No hay destinatarios válidos configurados'
-    payload = {
-        'sender': {'name': 'MONITOR SÍSMICO', 'email': 'sismoencurso@gmail.com'},
-        'to': [{'email': c} for c in destinatarios],
-        'subject': asunto, 'htmlContent': mensaje
-    }
+    payload = {'sender': {'name': 'MONITOR SÍSMICO', 'email': 'sismoencurso@gmail.com'},
+               'to': [{'email': c} for c in destinatarios], 'subject': asunto, 'htmlContent': mensaje}
     req = urllib.request.Request('https://api.brevo.com/v3/smtp/email', data=json.dumps(payload).encode(),
         headers={'api-key': api_key, 'Content-Type': 'application/json', 'Accept': 'application/json'}, method='POST')
     try:
@@ -129,8 +116,6 @@ def actualizar_estado(valor, datos):
     historial.append(magnitud)
     filtrada = sum(historial) / len(historial)
     direccion = datos.get('direccion', datos.get('direction', direccion))
-
-    # El NodeMCU calibra el MPU6050 al arrancar y envía calibrando=false.
     if datos.get('calibrando') is False:
         calibrando = False
     elif datos.get('calibrando') is True:
@@ -140,42 +125,30 @@ def actualizar_estado(valor, datos):
     if calibrando:
         estado, nivel = 'CALIBRANDO SENSOR', 1
         return
-
-    # Se usa la muestra instantánea además del promedio: un pico brusco no debe
-    # desaparecer dentro del filtro. UMBRAL_BRUSCO abre el evento inmediatamente.
     movimiento_instantaneo = magnitud >= UMBRAL_BRUSCO
     movimiento_detectado = magnitud >= UMBRAL_VIBRACION or filtrada >= UMBRAL_VIBRACION
     temblor_detectado = magnitud >= UMBRAL_TEMBLOR or filtrada >= UMBRAL_TEMBLOR
     critica_detectada = magnitud >= UMBRAL_ALERTA or filtrada >= UMBRAL_ALERTA
-
     if movimiento_detectado or movimiento_instantaneo:
         ultima_actividad = ahora
         if not evento_activo:
             evento_activo = True
             inicio_evento = ahora
             total_eventos += 1
-            maximo_evento = 0.0
-            duracion_evento = 0.0
+            maximo_evento = duracion_evento = 0.0
             inicio_movimiento_sostenido = 0.0
-            precursor_enviado = False
-            critica_enviada = False
+            precursor_enviado = critica_enviada = False
         maximo_evento = max(maximo_evento, magnitud, filtrada)
         duracion_evento = max(0.0, ahora - inicio_evento)
-
-    # Aviso de movimiento sostenido: 1 segundo de actividad sobre el umbral.
-    # Se cuenta la señal instantánea o la filtrada para responder sin demora.
     if evento_activo and temblor_detectado:
         if inicio_movimiento_sostenido == 0.0:
             inicio_movimiento_sostenido = ahora
         if ahora - inicio_movimiento_sostenido >= TIEMPO_PRECURSOR and not precursor_enviado:
             precursor_enviado = True
-            cuerpo = html_alerta('MOVIMIENTO SOSTENIDO', magnitud, filtrada, duracion_evento,
-                                 'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA')
+            cuerpo = html_alerta('MOVIMIENTO SOSTENIDO', magnitud, filtrada, duracion_evento, 'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA')
             enviar_alerta_async('MOVIMIENTO_SOSTENIDO', 'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA', 2, cuerpo)
     else:
         inicio_movimiento_sostenido = 0.0
-
-    # Un pico crítico instantáneo manda la alerta sin esperar el promedio móvil.
     if critica_detectada:
         nivel, estado, alerta_critica = 4, 'ALERTA CRITICA', True
         if not critica_enviada:
@@ -183,7 +156,6 @@ def actualizar_estado(valor, datos):
             cuerpo = html_alerta('ALERTA CRITICA', magnitud, filtrada, duracion_evento, 'ALERTA CRITICA')
             enviar_alerta_async('CRITICA', 'ALERTA CRÍTICA — ACTIVIDAD SÍSMICA INTENSA', 1, cuerpo)
         return
-
     if temblor_detectado:
         if alerta_critica and ahora - ultima_actividad < TIEMPO_ESTABLE_ALERTA:
             nivel, estado = 4, 'ALERTA CRITICA'
@@ -193,14 +165,11 @@ def actualizar_estado(valor, datos):
     if movimiento_detectado or movimiento_instantaneo:
         nivel, estado = 2, 'MOVIMIENTO DETECTADO'
         return
-
     calma = ahora - ultima_actividad if ultima_actividad else float('inf')
     if evento_activo and calma >= TIEMPO_FIN_EVENTO:
         evento_activo = False
         duracion_evento = max(0.0, ahora - inicio_evento)
-        inicio_evento = 0.0
-        inicio_movimiento_sostenido = 0.0
-        # Se conserva maximo_evento para mostrar el pico del último evento terminado.
+        inicio_evento = inicio_movimiento_sostenido = 0.0
     if alerta_critica:
         if calma < TIEMPO_ESTABLE_ALERTA:
             nivel, estado = 4, 'ALERTA CRITICA'
@@ -210,8 +179,7 @@ def actualizar_estado(valor, datos):
         nivel, estado = 2, 'MOVIMIENTO DETECTADO'
     elif filtrada <= UMBRAL_ESTABLE:
         nivel, estado = 1, 'SISTEMA ESTABLE'
-        precursor_enviado = False
-        critica_enviada = False
+        precursor_enviado = critica_enviada = False
     else:
         nivel, estado = 1, 'MOVIMIENTO LEVE'
 
@@ -223,13 +191,12 @@ def construir_estado():
     return {'ok': True, 'conexion': conectado,
         'conexion_texto': 'EN LÍNEA' if conectado else ('ESPERANDO DATOS' if not ultimo_dato else 'SIN DATOS DEL SENSOR'),
         'estado': estado_visible, 'magnitud': round(magnitud, 6), 'filtrada': round(filtrada, 6),
-        'actual': round(actual, 6),
-        'nivel': nivel, 'direccion': direccion, 'calibrando': calibrando, 'muestras': muestras_recibidas,
-        'eventos': total_eventos, 'maximo_evento': round(maximo_evento, 6),
+        'actual': round(actual, 6), 'nivel': nivel, 'direccion': direccion, 'calibrando': calibrando,
+        'muestras': muestras_recibidas, 'eventos': total_eventos, 'maximo_evento': round(maximo_evento, 6),
         'duracion_evento': round(duracion_evento, 2), 'evento_activo': evento_activo,
         'tiempo_activo': round(ahora - ultimo_dato, 2) if ultimo_dato else None,
-        'tiempo_servidor': round(ahora - inicio_servidor, 1), 'destinatarios_configurados': len(obtener_destinatarios()),
-        'correo': dict(ultimo_envio)}
+        'tiempo_servidor': round(ahora - inicio_servidor, 1),
+        'destinatarios_configurados': len(obtener_destinatarios()), 'correo': dict(ultimo_envio)}
 
 
 @app.route('/datos', methods=['POST'])
@@ -273,22 +240,31 @@ def probar_correo():
     return jsonify({'ok': ok, 'destinatarios': len(obtener_destinatarios()), 'detalle': detalle}), (200 if ok else 502)
 
 
-# HUD de pantalla completa: radar, barrido con bip, telemetría y gráfica histórica.
 PAGINA = r'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SEISMIC CORE X</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-:root{--bg:#030910;--panel:rgba(5,24,38,.9);--line:#12445a;--cyan:#00eaff;--green:#39ff9b;--yellow:#ffe66d;--orange:#ff984a;--red:#ff355e;--muted:#6e9aab}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at center,#0a2332,#030910 70%);color:#d7f8ff;font-family:Consolas,'Courier New',monospace}body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.1;background:repeating-linear-gradient(transparent 0 3px,rgba(0,234,255,.12) 4px);z-index:5}header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:17px 22px;border-bottom:1px solid var(--line);background:#020a12e8}.logo{color:var(--cyan);font-size:clamp(22px,3vw,36px);font-weight:bold;letter-spacing:4px;text-shadow:0 0 16px #00bfff}.sub{color:var(--muted);font-size:10px;letter-spacing:2px;margin-top:5px}.connection{font-size:12px;color:var(--yellow);text-align:right}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--yellow);margin-right:7px;box-shadow:0 0 10px currentColor}main{padding:14px;max-width:1800px;margin:auto}.grid{display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(300px,1fr) minmax(260px,.8fr);gap:12px}.panel{position:relative;background:var(--panel);border:1px solid var(--line);padding:15px;min-width:0;box-shadow:inset 0 0 22px #00beff09}.panel:before{content:'';position:absolute;top:-1px;left:15px;width:75px;border-top:2px solid var(--cyan)}.heading{font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:15px}.radar-wrap{width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background-image:url('/static/mapa_maipu.png');background-size:cover;background-position:center;border:1px solid rgba(0,234,255,0.3)}#radar{width:100%;height:100%;display:block;background:transparent}.radar-label{text-align:center;color:var(--green);font-size:13px;font-weight:bold;margin-top:8px;letter-spacing:2px;text-shadow:0 0 10px #39ff9b88}.status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}.level2{color:var(--yellow)!important;border-color:var(--yellow)!important}.level3{color:var(--orange)!important;border-color:var(--orange)!important}.level4{color:var(--red)!important;border-color:var(--red)!important;animation:blink .7s infinite}.offline{color:var(--muted)!important;border-color:var(--muted)!important}@keyframes blink{50%{opacity:.48}}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px}.metric{background:#000a14b3;border:1px solid #103346;padding:12px 10px;min-height:83px}.label{color:var(--muted);font-size:10px;letter-spacing:1px}.value{color:var(--cyan);font-size:clamp(20px,2.4vw,29px);margin-top:10px}.unit{color:var(--muted);font-size:10px}.bar{height:7px;background:#102c3b;margin-top:9px}.bar-inner{height:100%;width:0;background:var(--cyan);transition:width .25s}.info-row{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #123040;font-size:11px}.info-row span:first-child{color:var(--muted)}.info-row span:last-child{text-align:right;overflow-wrap:anywhere}.clock-panel{display:flex;align-items:center;justify-content:center;gap:16px;margin:13px auto 0;padding:12px;border:1px solid var(--line);background:#000a14b3;color:var(--muted);font-size:10px;letter-spacing:2px}.clock-panel strong{color:var(--cyan);font-size:clamp(20px,2.5vw,28px);letter-spacing:3px;text-shadow:0 0 12px #00eaff55;font-weight:600}#history{width:100%;height:100px;display:block;background:#03111b;border:1px solid #103346}.footer{color:#527d8c;font-size:10px;text-align:center;padding:18px 5px 8px;letter-spacing:1px}@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.side{grid-column:1/-1}}@media(max-width:680px){header{align-items:flex-start;flex-direction:column}.connection{text-align:left}.grid{grid-template-columns:1fr}.side{grid-column:auto}main{padding:8px}}
+:root{--bg:#030910;--panel:rgba(5,24,38,.9);--line:#12445a;--cyan:#00eaff;--green:#39ff9b;--yellow:#ffe66d;--orange:#ff984a;--red:#ff355e;--muted:#6e9aab}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at center,#0a2332,#030910 70%);color:#d7f8ff;font-family:Consolas,'Courier New',monospace}body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.1;background:repeating-linear-gradient(transparent 0 3px,rgba(0,234,255,.12) 4px);z-index:5}header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:17px 22px;border-bottom:1px solid var(--line);background:#020a12e8}.logo{color:var(--cyan);font-size:clamp(22px,3vw,36px);font-weight:bold;letter-spacing:4px;text-shadow:0 0 16px #00bfff}.sub{color:var(--muted);font-size:10px;letter-spacing:2px;margin-top:5px}.connection{font-size:12px;color:var(--yellow);text-align:right}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--yellow);margin-right:7px;box-shadow:0 0 10px currentColor}main{padding:14px;max-width:1800px;margin:auto}.grid{display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(300px,1fr) minmax(260px,.8fr);gap:12px}.panel{position:relative;background:var(--panel);border:1px solid var(--line);padding:15px;min-width:0;box-shadow:inset 0 0 22px #00beff09}.panel:before{content:'';position:absolute;top:-1px;left:15px;width:75px;border-top:2px solid var(--cyan)}.heading{font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:15px}.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:#020a08;border:1px solid rgba(57,255,155,.65);box-shadow:0 0 18px #39ff9b20}#mapa{position:absolute;inset:0;z-index:1;background:#020a08;filter:grayscale(1) brightness(.48) sepia(1) hue-rotate(75deg) saturate(2)}#radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent}.leaflet-container{background:#020a08!important}.leaflet-control-attribution{font-size:7px!important;background:rgba(0,0,0,.65)!important;color:#39ff9b!important}.leaflet-control-attribution a{color:#39ff9b!important}.map-label{background:#00150d;border:1px solid #39ff9b;color:#39ff9b;padding:3px 5px;font:10px Consolas,monospace;white-space:nowrap;box-shadow:0 0 10px #39ff9b66}.radar-label{text-align:center;color:var(--green);font-size:13px;font-weight:bold;margin-top:8px;letter-spacing:2px;text-shadow:0 0 10px #39ff9b88}.status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}.level2{color:var(--yellow)!important;border-color:var(--yellow)!important}.level3{color:var(--orange)!important;border-color:var(--orange)!important}.level4{color:var(--red)!important;border-color:var(--red)!important;animation:blink .7s infinite}.offline{color:var(--muted)!important;border-color:var(--muted)!important}@keyframes blink{50%{opacity:.48}}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px}.metric{background:#000a14b3;border:1px solid #103346;padding:12px 10px;min-height:83px}.label{color:var(--muted);font-size:10px;letter-spacing:1px}.value{color:var(--cyan);font-size:clamp(20px,2.4vw,29px);margin-top:10px}.unit{color:var(--muted);font-size:10px}.bar{height:7px;background:#102c3b;margin-top:9px}.bar-inner{height:100%;width:0;background:var(--cyan);transition:width .25s}.info-row{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #123040;font-size:11px}.info-row span:first-child{color:var(--muted)}.info-row span:last-child{text-align:right;overflow-wrap:anywhere}.clock-panel{display:flex;align-items:center;justify-content:center;gap:16px;margin:13px auto 0;padding:12px;border:1px solid var(--line);background:#000a14b3;color:var(--muted);font-size:10px;letter-spacing:2px}.clock-panel strong{color:var(--cyan);font-size:clamp(20px,2.5vw,28px);letter-spacing:3px;text-shadow:0 0 12px #00eaff55;font-weight:600}#history{width:100%;height:100px;display:block;background:#03111b;border:1px solid #103346}.footer{color:#527d8c;font-size:10px;text-align:center;padding:18px 5px 8px;letter-spacing:1px}@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.side{grid-column:1/-1}}@media(max-width:680px){header{align-items:flex-start;flex-direction:column}.connection{text-align:left}.grid{grid-template-columns:1fr}.side{grid-column:auto}main{padding:8px}}
 </style></head><body><header><div><div class="logo">SEISMIC CORE X</div><div class="sub">EL SISTEMA ESTÁ DETECTANDO · TELEMETRÍA EN VIVO</div></div><div class="connection"><div><span class="dot" id="dot"></span><span id="conn">EN LÍNEA</span></div></div></header>
-<main><div class="grid"><section class="panel"><div class="heading">01 / RADAR DE ACTIVIDAD</div><div class="radar-wrap"><canvas id="radar" width="600" height="600"></canvas></div><div class="radar-label">EL SISTEMA ESTÁ DETECTANDO</div><div class="clock-panel"><strong id="clock">--:--:--</strong></div></section>
+<main><div class="grid"><section class="panel"><div class="heading">01 / RADAR DE ACTIVIDAD</div><div class="radar-wrap"><div id="mapa"></div><canvas id="radar" width="600" height="600"></canvas></div><div class="radar-label">MAIPÚ · PUERTO CÁRDENAS</div><div class="clock-panel"><strong id="clock">--:--:--</strong></div></section>
 <section class="panel"><div class="heading">02 / ESTADO DEL SISTEMA</div><div id="status" class="status">ESPERANDO SENSOR</div><div class="metrics"><div class="metric"><div class="label">MAGNITUD</div><div class="value" id="mag">0.000000</div><div class="unit">VALOR RECIBIDO</div></div><div class="metric"><div class="label">SEÑAL FILTRADA</div><div class="value" id="fil">0.000000</div><div class="unit">PROMEDIO MÓVIL</div></div><div class="metric"><div class="label">NIVEL</div><div class="value" id="lvl">1</div><div class="unit">CLASIFICACIÓN INTERNA</div></div><div class="metric"><div class="label">EVENTOS</div><div class="value" id="events">0</div><div class="unit">CONTADOR DE EVENTOS</div></div></div><div class="info-row"><span>INTENSIDAD RELATIVA</span><span id="pct">0%</span></div><div class="bar"><div class="bar-inner" id="bar"></div></div></section>
 <section class="panel side"><div class="heading">03 / TELEMETRÍA</div><div class="info-row"><span>COMUNICACIÓN</span><span id="network">ESPERANDO</span></div><div class="info-row"><span>CALIBRACIÓN</span><span id="cal">PENDIENTE</span></div><div class="info-row"><span>DIRECCIÓN</span><span id="dir">--</span></div><div class="info-row"><span>PICO DEL EVENTO</span><span id="peak">0.000000</span></div><div class="info-row"><span>DURACIÓN</span><span id="dur">0.00 s</span></div><div class="info-row"><span>ÚLTIMA SEÑAL</span><span id="age">--</span></div><div class="info-row"><span>UMBRAL MOVIMIENTO</span><span>0.035</span></div><div class="info-row"><span>UMBRAL BRUSCO</span><span>0.060</span></div><div class="info-row"><span>UMBRAL ACTIVIDAD SOSTENIDA</span><span>0.060 / 3 s</span></div><div class="info-row"><span>UMBRAL CRÍTICO</span><span>0.150</span></div><div class="heading" style="margin-top:20px">04 / SEÑAL EN VIVO</div><canvas id="history" width="700" height="180"></canvas><div class="info-row"><span>MUESTRAS RECIBIDAS</span><span id="samples">0</span></div><div class="info-row"><span>DESTINATARIOS</span><span id="recipients">0</span></div><div class="info-row"><span>ÚLTIMO CORREO</span><span id="mail">SIN ENVÍOS</span></div></section></div><div class="footer">SEISMIC CORE X // TELEMETRÍA EXPERIMENTAL // NO ES UN SISTEMA OFICIAL DE ALERTA SÍSMICA</div></main>
-<script>
-const $=id=>document.getElementById(id),rc=$('radar').getContext('2d'),hc=$('history').getContext('2d');let angle=0,enabled=false,paused=false,audio=null,lastSweep=-1,level=1,mag=0,radarMag=0,history=Array(120).fill(0),lastStatus='';function color(l){return l>=4?'#ff355e':l===3?'#ff984a':l===2?'#ffe66d':'#39ff9b'}function beep(f=660,d=.08,v=.03){if(!enabled||paused)return;try{if(!audio)audio=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();let o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch(e){}}async function activarAudio(){if(enabled)return;try{audio=new(window.AudioContext||window.webkitAudioContext)();await audio.resume();enabled=true;paused=false;beep(880,.12,.045)}catch(e){enabled=false}}document.addEventListener('pointerdown',activarAudio,{once:true});document.addEventListener('keydown',activarAudio,{once:true});function radar(){let w=600,c=300,r=250;rc.clearRect(0,0,600,600);rc.strokeStyle='#00eaff3b';for(let i=1;i<=4;i++){rc.beginPath();rc.arc(c,c,r*i/4,0,Math.PI*2);rc.stroke()}rc.beginPath();rc.moveTo(c-r,c);rc.lineTo(c+r,c);rc.moveTo(c,c-r);rc.lineTo(c,c+r);rc.stroke();let g=rc.createConicGradient(angle,c,c);g.addColorStop(0,'#00ffcc55');g.addColorStop(.18,'#00ffcc10');g.addColorStop(.25,'#00ffcc00');g.addColorStop(1,'#00ffcc00');rc.fillStyle=g;rc.beginPath();rc.moveTo(c,c);rc.arc(c,c,r,0,Math.PI*2);rc.fill();rc.strokeStyle='#00eaff';rc.lineWidth=2;rc.beginPath();rc.moveTo(c,c);rc.lineTo(c+Math.cos(angle)*r,c+Math.sin(angle)*r);rc.stroke();if(radarMag>=.008){let p=Math.min(.88,Math.max(.12,radarMag/.2)),x=c+Math.cos(-.62)*r*p,y=c+Math.sin(-.62)*r*p;rc.save();rc.shadowBlur=24;rc.shadowColor=color(level);rc.fillStyle=color(level);rc.beginPath();rc.arc(x,y,level>=3?9:6,0,Math.PI*2);rc.fill();rc.restore()}angle+=.012;let b=Math.floor(angle/(2*Math.PI));if(b!==lastSweep){lastSweep=b;beep()}requestAnimationFrame(radar)}function graph(){hc.clearRect(0,0,700,180);hc.fillStyle='#03111b';hc.fillRect(0,0,700,180);hc.strokeStyle='#123040';for(let y=30;y<180;y+=30){hc.beginPath();hc.moveTo(0,y);hc.lineTo(700,y);hc.stroke()}hc.strokeStyle=color(level);hc.lineWidth=2;hc.beginPath();history.forEach((v,i)=>{let x=i*700/(history.length-1),y=172-Math.min(1,Math.abs(v)/.2)*164;i?hc.lineTo(x,y):hc.moveTo(x,y)});hc.stroke()}async function refresh(){try{let r=await fetch('/estado',{cache:'no-store'});if(!r.ok)throw Error(r.status);let d=await r.json(),on=!!d.conexion;$('conn').textContent=on?'EN LÍNEA':(d.conexion_texto||'SIN DATOS');$('dot').style.background=on?'#39ff9b':'#ff355e';$('network').textContent=on?'EN LÍNEA':'SIN COMUNICACIÓN';let s=$('status');s.textContent=d.estado||'ESPERANDO SENSOR';s.className='status';level=Number(d.nivel||1);if(!on)s.classList.add('offline');else if(level===2)s.classList.add('level2');else if(level===3)s.classList.add('level3');else if(level>=4)s.classList.add('level4');mag=Number(d.filtrada||0);radarMag=Number(d.actual??d.magnitud??0);$('mag').textContent=radarMag.toFixed(6);$('fil').textContent=mag.toFixed(6);$('lvl').textContent=level;$('events').textContent=d.eventos||0;$('cal').textContent=d.calibrando?'EN CURSO':'COMPLETADA';$('dir').textContent=d.direccion||'--';$('peak').textContent=Number(d.maximo_evento||0).toFixed(6);$('dur').textContent=Number(d.duracion_evento||0).toFixed(2)+' s';$('samples').textContent=d.muestras||0;$('age').textContent=d.tiempo_activo==null?'--':Number(d.tiempo_activo).toFixed(1)+' s';$('recipients').textContent=d.destinatarios_configurados??0;let m=d.correo||{};$('mail').textContent=m.tipo?(m.ok?'OK: ':'ERROR: ')+m.tipo:'SIN ENVÍOS';let p=Math.min(100,Math.max(0,mag/.2*100));$('pct').textContent=p.toFixed(1)+'%';$('bar').style.width=p+'%';$('bar').style.background=color(level);history.push(mag);if(history.length>120)history.shift();graph();if(lastStatus&&lastStatus!==d.estado&&enabled){if(level>=4)beep(180,.45,.12);else if(level===3)beep(300,.22,.08);else if(level===2)beep(460,.12,.05);else beep(720,.08,.025)}lastStatus=d.estado||''}catch(e){$('conn').textContent='ERROR DE CONEXIÓN';$('network').textContent='ERROR'}}$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false});setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false}),1000);setInterval(refresh,200);radar();graph();refresh();
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
+const $=id=>document.getElementById(id);
+// Centro aproximado del sector Pasaje Puerto Cárdenas / Población Oreste Plath, Maipú.
+// El punto es una referencia de mapa, no una coordenada GPS confirmada del sensor.
+const mapa=L.map('mapa',{zoomControl:false,attributionControl:true,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,keyboard:false}).setView([-33.4937,-70.7474],17);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(mapa);
+const icono=L.divIcon({className:'',html:'<div style="width:12px;height:12px;border:2px solid #39ff9b;background:#00150d;border-radius:50%;box-shadow:0 0 14px #39ff9b"></div>',iconSize:[12,12],iconAnchor:[6,6]});
+L.marker([-33.4937,-70.7474],{icon:icono}).addTo(mapa).bindTooltip('PUERTO CÁRDENAS · MAIPÚ',{permanent:true,direction:'top',offset:[0,-7],className:'map-label'});
+setTimeout(()=>mapa.invalidateSize(),500);
+const rc=$('radar').getContext('2d'),hc=$('history').getContext('2d');let angle=0,enabled=false,paused=false,audio=null,lastSweep=-1,level=1,mag=0,radarMag=0,history=Array(120).fill(0),lastStatus='';function color(l){return l>=4?'#ff355e':l===3?'#ff984a':l===2?'#ffe66d':'#39ff9b'}function beep(f=660,d=.08,v=.03){if(!enabled||paused)return;try{if(!audio)audio=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();let o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch(e){}}async function activarAudio(){if(enabled)return;try{audio=new(window.AudioContext||window.webkitAudioContext)();await audio.resume();enabled=true;paused=false;beep(880,.12,.045)}catch(e){enabled=false}}document.addEventListener('pointerdown',activarAudio,{once:true});document.addEventListener('keydown',activarAudio,{once:true});function radar(){let c=300,r=250;rc.clearRect(0,0,600,600);rc.strokeStyle='#39ff9b55';rc.lineWidth=1;for(let i=1;i<=4;i++){rc.beginPath();rc.arc(c,c,r*i/4,0,Math.PI*2);rc.stroke()}rc.beginPath();rc.moveTo(c-r,c);rc.lineTo(c+r,c);rc.moveTo(c,c-r);rc.lineTo(c,c+r);rc.stroke();let g=rc.createConicGradient(angle,c,c);g.addColorStop(0,'#39ff9b55');g.addColorStop(.18,'#39ff9b10');g.addColorStop(.25,'#39ff9b00');g.addColorStop(1,'#39ff9b00');rc.fillStyle=g;rc.beginPath();rc.moveTo(c,c);rc.arc(c,c,r,0,Math.PI*2);rc.fill();rc.strokeStyle='#39ff9b';rc.lineWidth=2;rc.beginPath();rc.moveTo(c,c);rc.lineTo(c+Math.cos(angle)*r,c+Math.sin(angle)*r);rc.stroke();if(radarMag>=.008){let p=Math.min(.88,Math.max(.12,radarMag/.2)),x=c+Math.cos(-.62)*r*p,y=c+Math.sin(-.62)*r*p;rc.save();rc.shadowBlur=24;rc.shadowColor=color(level);rc.fillStyle=color(level);rc.beginPath();rc.arc(x,y,level>=3?9:6,0,Math.PI*2);rc.fill();rc.restore()}angle+=.012;let b=Math.floor(angle/(2*Math.PI));if(b!==lastSweep){lastSweep=b;beep()}requestAnimationFrame(radar)}function graph(){hc.clearRect(0,0,700,180);hc.fillStyle='#03111b';hc.fillRect(0,0,700,180);hc.strokeStyle='#123040';for(let y=30;y<180;y+=30){hc.beginPath();hc.moveTo(0,y);hc.lineTo(700,y);hc.stroke()}hc.strokeStyle=color(level);hc.lineWidth=2;hc.beginPath();history.forEach((v,i)=>{let x=i*700/(history.length-1),y=172-Math.min(1,Math.abs(v)/.2)*164;i?hc.lineTo(x,y):hc.moveTo(x,y)});hc.stroke()}async function refresh(){try{let r=await fetch('/estado',{cache:'no-store'});if(!r.ok)throw Error(r.status);let d=await r.json(),on=!!d.conexion;$('conn').textContent=on?'EN LÍNEA':(d.conexion_texto||'SIN DATOS');$('dot').style.background=on?'#39ff9b':'#ff355e';$('network').textContent=on?'EN LÍNEA':'SIN COMUNICACIÓN';let s=$('status');s.textContent=d.estado||'ESPERANDO SENSOR';s.className='status';level=Number(d.nivel||1);if(!on)s.classList.add('offline');else if(level===2)s.classList.add('level2');else if(level===3)s.classList.add('level3');else if(level>=4)s.classList.add('level4');mag=Number(d.filtrada||0);radarMag=Number(d.actual??d.magnitud??0);$('mag').textContent=radarMag.toFixed(6);$('fil').textContent=mag.toFixed(6);$('lvl').textContent=level;$('events').textContent=d.eventos||0;$('cal').textContent=d.calibrando?'EN CURSO':'COMPLETADA';$('dir').textContent=d.direccion||'--';$('peak').textContent=Number(d.maximo_evento||0).toFixed(6);$('dur').textContent=Number(d.duracion_evento||0).toFixed(2)+' s';$('samples').textContent=d.muestras||0;$('age').textContent=d.tiempo_activo==null?'--':Number(d.tiempo_activo).toFixed(1)+' s';$('recipients').textContent=d.destinatarios_configurados??0;let m=d.correo||{};$('mail').textContent=m.tipo?(m.ok?'OK: ':'ERROR: ')+m.tipo:'SIN ENVÍOS';let p=Math.min(100,Math.max(0,mag/.2*100));$('pct').textContent=p.toFixed(1)+'%';$('bar').style.width=p+'%';$('bar').style.background=color(level);history.push(mag);if(history.length>120)history.shift();graph();if(lastStatus&&lastStatus!==d.estado&&enabled){if(level>=4)beep(180,.45,.12);else if(level===3)beep(300,.22,.08);else if(level===2)beep(460,.12,.05);else beep(720,.08,.025)}lastStatus=d.estado||''}catch(e){$('conn').textContent='ERROR DE CONEXIÓN';$('network').textContent='ERROR'}}$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false});setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false}),1000);setInterval(refresh,200);radar();graph();refresh();
 </script></body></html>'''
 
 
 @app.route('/', methods=['GET'])
 def index():
     return Response(PAGINA, mimetype='text/html; charset=utf-8')
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', '10000')))
