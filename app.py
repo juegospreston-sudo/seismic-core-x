@@ -255,24 +255,20 @@ const $=id=>document.getElementById(id);
 const rc=$('radar').getContext('2d'),hc=$('history').getContext('2d');let angle=0,enabled=false,paused=false,audio=null,lastSweep=-1,level=1,mag=0,radarMag=0,history=Array(120).fill(0),lastStatus='';function color(l){return l>=4?'#ff355e':l===3?'#ff984a':l===2?'#ffe66d':'#39ff9b'}function beep(f=660,d=.08,v=.03){if(!enabled||paused)return;try{if(!audio)audio=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();let o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch(e){}}async function activarAudio(){if(enabled)return;try{audio=new(window.AudioContext||window.webkitAudioContext)();await audio.resume();enabled=true;paused=false;beep(880,.12,.045)}catch(e){enabled=false}}document.addEventListener('pointerdown',activarAudio,{once:true});document.addEventListener('keydown',activarAudio,{once:true});function radar(){let c=300,r=250;rc.clearRect(0,0,600,600);
 // Fondo de mapa entorno urbanizado (Maipú y alrededores) en capas transparentes y detalladas
 rc.save();
-// Zonas de bloques urbanos perimetrales
 for(let a=0; a<Math.PI*2; a+=Math.PI/8){
   rc.beginPath(); rc.moveTo(c, c);
   rc.lineTo(c + Math.cos(a)*r*0.95, c + Math.sin(a)*r*0.95);
   rc.strokeStyle='rgba(45,160,200,0.12)'; rc.lineWidth=1.5; rc.stroke();
 }
-// Anillos de distancias del entorno
 for(let rad=45; rad<=r; rad+=45){
   rc.beginPath(); rc.arc(c, c, rad, 0, Math.PI*2);
   rc.strokeStyle='rgba(70,230,190,0.15)'; rc.lineWidth=1; rc.stroke();
 }
-// Retícula detallada de calles de entorno (bloques y pasajes conectados)
 rc.strokeStyle='rgba(100,230,255,0.09)'; rc.lineWidth=1;
 for(let x=-250; x<=250; x+=35){
   rc.beginPath(); rc.moveTo(c+x, c-250); rc.lineTo(c+x, c+250); rc.stroke();
   rc.beginPath(); rc.moveTo(c-250, c+x); rc.lineTo(c+250, c+x); rc.stroke();
 }
-// Nombres de entorno sutiles distribuidos para realismo cartográfico
 rc.fillStyle='rgba(130,180,200,0.45)'; rc.font='9px Inter, Arial, sans-serif'; rc.textAlign='center';
 rc.fillText('AV. PAJARITOS', c - 90, c - 110);
 rc.fillText('TRES NTE', c + 80, c - 70);
@@ -280,10 +276,8 @@ rc.fillText('VILLA LOS HÉROES', c - 70, c + 95);
 rc.fillText('EL ROSAL', c + 100, c + 110);
 rc.restore();
 
-// Estructura del radar superpuesta
 rc.strokeStyle='#39ff9b55';rc.lineWidth=1;for(let i=1;i<=4;i++){rc.beginPath();rc.arc(c,c,r*i/4,0,Math.PI*2);rc.stroke()}rc.beginPath();rc.moveTo(c-r,c);rc.lineTo(c+r,c);rc.moveTo(c,c-r);rc.lineTo(c,c+r);rc.stroke();let g=rc.createConicGradient(angle,c,c);g.addColorStop(0,'#39ff9b55');g.addColorStop(.18,'#39ff9b10');g.addColorStop(.25,'#39ff9b00');g.addColorStop(1,'#39ff9b00');rc.fillStyle=g;rc.beginPath();rc.moveTo(c,c);rc.arc(c,c,r,0,Math.PI*2);rc.fill();rc.strokeStyle='#39ff9b';rc.lineWidth=2;rc.beginPath();rc.moveTo(c,c);rc.lineTo(c+Math.cos(angle)*r,c+Math.sin(angle)*r);rc.stroke();
 
-// Centro exacto: Pasaje Puerto Cárdenas
 rc.save();rc.shadowBlur=18;rc.shadowColor='#64e8ff';rc.fillStyle='#64e8ff';rc.beginPath();rc.arc(c,c,5.5,0,Math.PI*2);rc.fill();
 rc.font='700 10.5px Inter, Arial, sans-serif';rc.fillStyle='#e0ffff';rc.textAlign='center';rc.fillText('PUERTO CÁRDENAS',c,c-12);rc.restore();
 
