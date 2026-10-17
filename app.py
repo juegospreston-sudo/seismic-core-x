@@ -541,7 +541,8 @@ main{padding:16px;max-width:1800px;margin:auto}
 .radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(5,28,22,.92);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
 #mapa{position:absolute;inset:0;z-index:1;background:#03120d;isolation:isolate;border-radius:50%;overflow:hidden}
 #mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 35% 30%,rgba(63,245,176,.18) 0%,transparent 55%),radial-gradient(ellipse at 70% 70%,rgba(100,232,255,.12) 0%,transparent 65%),linear-gradient(145deg,rgba(4,38,28,.15),rgba(1,14,10,.35));mix-blend-mode:screen}
-#mapa .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(0.65) contrast(1.4) saturate(1.2);opacity:.92}
+/* Letras y nombres de calles con mayor brillo y contraste */
+#mapa .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(0.85) contrast(1.7) saturate(1.4);opacity:.95}
 #radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent;pointer-events:none}
 .leaflet-container{background:#03120d!important}
 .leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
@@ -657,7 +658,7 @@ const mapa=L.map('mapa',{
     doubleClickZoom:false,
     touchZoom:false,
     keyboard:false
-}).setView([-33.4937,-70.7474],15); // Zoom reducido a 15 para abarcar más área y calles
+}).setView([-33.4937,-70.7474],16); // Zoom ajustado a 16 para abarcar más área y mostrar Puerto Cárdenas
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
