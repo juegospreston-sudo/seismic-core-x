@@ -69,4 +69,947 @@ def enviar_correo_brevo(destinatarios, asunto, mensaje):
     }
 
     req = urllib.request.Request(
-        '
+        'https://api.brevo.com/v3/smtp/email',
+        data=json.dumps(payload).encode(),
+        headers={
+            'api-key': api_key,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode('utf-8', errors='replace')
+            return resp.status in (200, 201, 202), body or f'HTTP {resp.status}'
+
+    except urllib.error.HTTPError as e:
+        return False, (
+            f'Brevo HTTP {e.code}: '
+            f'{e.read().decode("utf-8", errors="replace")}'
+        )
+
+    except Exception as e:
+        return False, str(e)
+
+
+def registrar_envio(tipo, ok, detalle):
+    global ultimo_envio
+
+    with lock:
+        ultimo_envio = {
+            'tipo': tipo,
+            'ok': bool(ok),
+            'detalle': str(detalle)[:1000],
+            'hora': time.strftime(
+                '%Y-%m-%d %H:%M:%S',
+                time.localtime()
+            )
+        }
+
+
+def html_alerta(tipo, valor, valor_filtrado, duracion, estado_alerta):
+    color = (
+        '#ff355e'
+        if 'CRITICA' in tipo.upper()
+        else '#ff984a'
+    )
+
+    return f'''<!doctype html>
+<html lang="es">
+<body style="background:#07111b;color:#d7f8ff;font-family:Arial,sans-serif;padding:24px">
+<div style="max-width:650px;margin:auto;border:1px solid {color};padding:24px;background:#0a1b28">
+<h1 style="color:#00eaff">SENSOR ACTIVO</h1>
+<p style="color:#79aabb;letter-spacing:2px">MONITOREO EN CURSO · SEISMIC CORE X</p>
+<h2 style="color:{color}">{html.escape(tipo)}</h2>
+<p><b>Estado:</b> {html.escape(estado_alerta)}</p>
+<p><b>Magnitud recibida:</b> {valor:.6f}</p>
+<p><b>Señal filtrada:</b> {valor_filtrado:.6f}</p>
+<p><b>Duración:</b> {duracion:.2f} s</p>
+<p>Hora: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}</p>
+<hr>
+<small>Monitor experimental de vibraciones; no es una predicción sísmica ni una alerta oficial.</small>
+</div>
+</body>
+</html>'''
+
+
+def enviar_alerta_async(tipo, asunto, cantidad, cuerpo):
+    def trabajo():
+        destinatarios = obtener_destinatarios()
+
+        if not destinatarios:
+            registrar_envio(
+                tipo,
+                False,
+                'No hay destinatarios válidos configurados'
+            )
+            app.logger.error(
+                'Alerta %s no enviada: no hay destinatarios válidos',
+                tipo
+            )
+            return
+
+        resultados = []
+        todo_ok = True
+
+        for i in range(cantidad):
+            sufijo = (
+                f' (aviso {i + 1} de {cantidad})'
+                if cantidad > 1 else ''
+            )
+
+            ok, detalle = enviar_correo_brevo(
+                destinatarios,
+                asunto + sufijo,
+                cuerpo
+            )
+
+            resultados.append(
+                f'{i + 1}: {"OK" if ok else "ERROR"} — {detalle}'
+            )
+            todo_ok = todo_ok and ok
+
+        registrar_envio(
+            tipo,
+            todo_ok,
+            ' | '.join(resultados)
+        )
+
+    Thread(target=trabajo, daemon=True).start()
+
+
+def num(v, default=0.0):
+    try:
+        x = float(v)
+        return x if math.isfinite(x) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def obtener_magnitud(datos):
+    for key in (
+        'magnitud', 'magnitude', 'mag',
+        'vibracion', 'vibration',
+        'aceleracion', 'acceleration',
+        'filtrada', 'filtered', 'valor'
+    ):
+        if key in datos:
+            return abs(num(datos[key]))
+
+    return None
+
+
+def actualizar_estado(valor, datos):
+    global ultimo_dato, ultima_actividad, inicio_evento
+    global inicio_movimiento_sostenido
+    global magnitud, filtrada, actual, nivel, estado
+    global direccion, calibrando, muestras_recibidas
+    global total_eventos, maximo_evento, duracion_evento
+    global evento_activo, alerta_critica
+    global precursor_enviado, critica_enviada
+
+    ahora = time.time()
+    ultimo_dato = ahora
+    muestras_recibidas += 1
+
+    magnitud = abs(valor)
+    actual = abs(num(datos.get('actual', magnitud)))
+
+    historial.append(magnitud)
+    filtrada = sum(historial) / len(historial)
+
+    direccion = datos.get(
+        'direccion',
+        datos.get('direction', direccion)
+    )
+
+    if datos.get('calibrando') is False:
+        calibrando = False
+    elif datos.get('calibrando') is True:
+        calibrando = True
+    elif muestras_recibidas >= MUESTRAS_CALIBRACION:
+        calibrando = False
+
+    if calibrando:
+        estado, nivel = 'CALIBRANDO SENSOR', 1
+        return
+
+    movimiento_instantaneo = magnitud >= UMBRAL_BRUSCO
+
+    movimiento_detectado = (
+        magnitud >= UMBRAL_VIBRACION
+        or filtrada >= UMBRAL_VIBRACION
+    )
+
+    temblor_detectado = (
+        magnitud >= UMBRAL_TEMBLOR
+        or filtrada >= UMBRAL_TEMBLOR
+    )
+
+    critica_detectada = (
+        magnitud >= UMBRAL_ALERTA
+        or filtrada >= UMBRAL_ALERTA
+    )
+
+    if movimiento_detectado or movimiento_instantaneo:
+        ultima_actividad = ahora
+
+        if not evento_activo:
+            evento_activo = True
+            inicio_evento = ahora
+            total_eventos += 1
+            maximo_evento = 0.0
+            duracion_evento = 0.0
+            inicio_movimiento_sostenido = 0.0
+            precursor_enviado = False
+            critica_enviada = False
+
+        maximo_evento = max(
+            maximo_evento,
+            magnitud,
+            filtrada
+        )
+
+        duracion_evento = max(
+            0.0,
+            ahora - inicio_evento
+        )
+
+    if evento_activo and temblor_detectado:
+        if inicio_movimiento_sostenido == 0.0:
+            inicio_movimiento_sostenido = ahora
+
+        if (
+            ahora - inicio_movimiento_sostenido >= TIEMPO_PRECURSOR
+            and not precursor_enviado
+        ):
+            precursor_enviado = True
+
+            cuerpo = html_alerta(
+                'MOVIMIENTO SOSTENIDO',
+                magnitud,
+                filtrada,
+                duracion_evento,
+                'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA'
+            )
+
+            enviar_alerta_async(
+                'MOVIMIENTO_SOSTENIDO',
+                'MOVIMIENTO SOSTENIDO — REVISAR TELEMETRÍA',
+                2,
+                cuerpo
+            )
+    else:
+        inicio_movimiento_sostenido = 0.0
+
+    if critica_detectada:
+        nivel = 4
+        estado = 'ALERTA CRITICA'
+        alerta_critica = True
+
+        if not critica_enviada:
+            critica_enviada = True
+
+            cuerpo = html_alerta(
+                'ALERTA CRITICA',
+                magnitud,
+                filtrada,
+                duracion_evento,
+                'ALERTA CRITICA'
+            )
+
+            enviar_alerta_async(
+                'CRITICA',
+                'ALERTA CRÍTICA — ACTIVIDAD SÍSMICA INTENSA',
+                1,
+                cuerpo
+            )
+
+        return
+
+    if temblor_detectado:
+        if (
+            alerta_critica
+            and ahora - ultima_actividad < TIEMPO_ESTABLE_ALERTA
+        ):
+            nivel, estado = 4, 'ALERTA CRITICA'
+        else:
+            nivel, estado = 3, 'SISMO EN CURSO'
+
+        return
+
+    if movimiento_detectado or movimiento_instantaneo:
+        nivel, estado = 2, 'MOVIMIENTO DETECTADO'
+        return
+
+    calma = (
+        ahora - ultima_actividad
+        if ultima_actividad
+        else float('inf')
+    )
+
+    if evento_activo and calma >= TIEMPO_FIN_EVENTO:
+        evento_activo = False
+        duracion_evento = max(
+            0.0,
+            ahora - inicio_evento
+        )
+        inicio_evento = 0.0
+        inicio_movimiento_sostenido = 0.0
+
+    if alerta_critica:
+        if calma < TIEMPO_ESTABLE_ALERTA:
+            nivel, estado = 4, 'ALERTA CRITICA'
+            return
+
+        alerta_critica = False
+
+    if evento_activo:
+        nivel, estado = 2, 'MOVIMIENTO DETECTADO'
+    elif filtrada <= UMBRAL_ESTABLE:
+        nivel, estado = 1, 'SISTEMA ESTABLE'
+        precursor_enviado = False
+        critica_enviada = False
+    else:
+        nivel, estado = 1, 'MOVIMIENTO LEVE'
+
+
+def construir_estado():
+    ahora = time.time()
+
+    conectado = bool(
+        ultimo_dato and ahora - ultimo_dato < 15
+    )
+
+    estado_visible = (
+        estado
+        if conectado
+        else (
+            'ESPERANDO SENSOR'
+            if not ultimo_dato
+            else 'SENSOR SIN COMUNICACION'
+        )
+    )
+
+    return {
+        'ok': True,
+        'conexion': conectado,
+        'conexion_texto': (
+            'EN LÍNEA'
+            if conectado
+            else (
+                'ESPERANDO DATOS'
+                if not ultimo_dato
+                else 'SIN DATOS DEL SENSOR'
+            )
+        ),
+        'estado': estado_visible,
+        'magnitud': round(magnitud, 6),
+        'filtrada': round(filtrada, 6),
+        'actual': round(actual, 6),
+        'nivel': nivel,
+        'direccion': direccion,
+        'calibrando': calibrando,
+        'muestras': muestras_recibidas,
+        'eventos': total_eventos,
+        'maximo_evento': round(maximo_evento, 6),
+        'duracion_evento': round(duracion_evento, 2),
+        'evento_activo': evento_activo,
+        'tiempo_activo': (
+            round(ahora - ultimo_dato, 2)
+            if ultimo_dato else None
+        ),
+        'tiempo_servidor': round(
+            ahora - inicio_servidor, 1
+        ),
+        'destinatarios_configurados': len(
+            obtener_destinatarios()
+        ),
+        'correo': dict(ultimo_envio)
+    }
+
+
+@app.route('/datos', methods=['POST'])
+def recibir_datos():
+    datos = request.get_json(silent=True)
+
+    if not isinstance(datos, dict):
+        datos = request.form.to_dict()
+
+    if not datos:
+        return jsonify({
+            'ok': False,
+            'error': 'No se recibieron datos JSON'
+        }), 400
+
+    valor = obtener_magnitud(datos)
+
+    if valor is None:
+        x = datos.get('x', datos.get('ax'))
+        y = datos.get('y', datos.get('ay'))
+        z = datos.get('z', datos.get('az'))
+
+        if x is None or y is None or z is None:
+            return jsonify({
+                'ok': False,
+                'error': 'Falta magnitud o ejes x, y, z'
+            }), 400
+
+        valor = abs(
+            math.sqrt(
+                num(x)**2 + num(y)**2 + num(z)**2
+            ) - 1.0
+        )
+
+    with lock:
+        actualizar_estado(valor, datos)
+        result = construir_estado()
+
+    return jsonify({
+        'ok': True,
+        'estado': result['estado'],
+        'magnitud': result['magnitud'],
+        'filtrada': result['filtrada']
+    })
+
+
+@app.route('/estado', methods=['GET'])
+def consultar_estado():
+    with lock:
+        return jsonify(construir_estado())
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'ok': True,
+        'service': 'SEISMIC CORE X'
+    })
+
+
+@app.route('/probar-correo', methods=['POST'])
+def probar_correo():
+    token = os.environ.get('ADMIN_TOKEN')
+
+    if token and request.headers.get('X-Admin-Token') != token:
+        return jsonify({
+            'ok': False,
+            'error': 'No autorizado'
+        }), 401
+
+    ok, detalle = enviar_correo_brevo(
+        obtener_destinatarios(),
+        'PRUEBA DE CORREO — MONITOR SÍSMICO',
+        '<h2>Prueba de correo</h2>'
+        '<p>Prueba de envío de SEISMIC CORE X mediante Brevo. '
+        'No es una alerta sísmica.</p>'
+    )
+
+    registrar_envio('PRUEBA', ok, detalle)
+
+    return jsonify({
+        'ok': ok,
+        'destinatarios': len(obtener_destinatarios()),
+        'detalle': detalle
+    }), (200 if ok else 502)
+
+
+PAGINA = r'''<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SEISMIC CORE X</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#050b12;--panel:rgba(7,18,29,.94);--line:#1b3949;--cyan:#64e8ff;--green:#63f5b0;--yellow:#ffd66b;--orange:#ffad70;--red:#ff5874;--muted:#8299a8}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 48% 0%,#102637 0%,#07111c 48%,#03070d 100%);color:#e5f2f7;font-family:Inter,Segoe UI,Arial,sans-serif}
+body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.035;background:repeating-linear-gradient(transparent 0 4px,rgba(100,232,255,.18) 5px);z-index:5}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:19px 26px;border-bottom:1px solid #203c4b;background:rgba(3,10,17,.92);box-shadow:0 8px 30px #0005}
+.logo{color:var(--cyan);font-size:clamp(22px,3vw,35px);font-weight:750;letter-spacing:3px;text-shadow:0 0 22px #00bfff33}
+.sub{color:#8da6b5;font-size:10px;letter-spacing:2px;margin-top:6px}
+.connection{font-size:12px;color:var(--yellow);text-align:right}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--yellow);margin-right:7px;box-shadow:0 0 10px currentColor}
+main{padding:16px;max-width:1800px;margin:auto}
+.grid{display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(300px,1fr) minmax(260px,.8fr);gap:14px}
+.panel{position:relative;background:linear-gradient(145deg,rgba(12,29,43,.96),rgba(5,15,25,.96));border:1px solid #203d4d;border-radius:13px;padding:17px;min-width:0;box-shadow:0 12px 35px #0003,inset 0 1px #ffffff08}
+.panel:before{content:'';position:absolute;top:-1px;left:15px;width:66px;border-top:2px solid var(--cyan);opacity:.8}
+.heading{font-size:10px;color:#9dc8d8;letter-spacing:2px;margin-bottom:16px;font-weight:700}
+.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(5,28,22,.92);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
+#mapa{position:absolute;inset:0;z-index:1;background:#03120d;isolation:isolate;border-radius:50%;overflow:hidden}
+#mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 35% 30%,rgba(63,245,176,.18) 0%,transparent 55%),radial-gradient(ellipse at 70% 70%,rgba(100,232,255,.12) 0%,transparent 65%),linear-gradient(145deg,rgba(4,38,28,.15),rgba(1,14,10,.35));mix-blend-mode:screen}
+#mapa .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(1.35) contrast(2.3) saturate(1.7);opacity:.99}
+#radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent;pointer-events:none}
+.leaflet-container{background:#03120d!important}
+.leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
+.leaflet-control-attribution a{color:#81e9d0!important}
+.street-text-label{background:transparent;border:none;box-shadow:none;color:#ffffff;font:700 11px Inter,Arial,sans-serif;letter-spacing:.8px;text-shadow:0 0 5px #000,0 0 9px #000,0 0 12px #39ff9b;white-space:nowrap}
+.radar-label{text-align:center;color:#c8eee7;font-size:12px;font-weight:700;margin-top:17px;letter-spacing:1.8px;text-shadow:0 0 14px rgba(45,220,180,.16)}
+.status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}
+.level2{color:var(--yellow)!important;border-color:var(--yellow)!important}
+.level3{color:var(--orange)!important;border-color:var(--orange)!important}
+.level4{color:var(--red)!important;border-color:var(--red)!important;animation:blink .7s infinite}
+.offline{color:var(--muted)!important;border-color:var(--muted)!important}
+@keyframes blink{50%{opacity:.48}}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.metric{background:#000a14b3;border:1px solid #103346;padding:12px 10px;min-height:83px}
+.label{color:var(--muted);font-size:10px;letter-spacing:1px}
+.value{color:var(--cyan);font-size:clamp(20px,2.4vw,29px);margin-top:10px}
+.unit{color:var(--muted);font-size:10px}
+.bar{height:7px;background:#102c3b;margin-top:9px}
+.bar-inner{height:100%;width:0;background:var(--cyan);transition:width .25s}
+.info-row{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #123040;font-size:11px}
+.info-row span:first-child{color:var(--muted)}
+.info-row span:last-child{text-align:right;overflow-wrap:anywhere}
+.clock-panel{display:flex;align-items:center;justify-content:center;gap:16px;margin:13px auto 0;padding:12px;border:1px solid var(--line);background:#000a14b3;color:var(--muted);font-size:10px;letter-spacing:2px}
+.clock-panel strong{color:var(--cyan);font-size:clamp(20px,2.5vw,28px);letter-spacing:3px;text-shadow:0 0 12px #00eaff55;font-weight:600}
+#history{width:100%;height:100px;display:block;background:#03111b;border:1px solid #103346}
+.footer{color:#527d8c;font-size:10px;text-align:center;padding:18px 5px 8px;letter-spacing:1px}
+@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.side{grid-column:1/-1}}
+@media(max-width:680px){header{align-items:flex-start;flex-direction:column}.connection{text-align:left}.grid{grid-template-columns:1fr}.side{grid-column:auto}main{padding:8px}}
+</style>
+</head>
+<body>
+<header>
+<div>
+<div class="logo">SEISMIC CORE X</div>
+<div class="sub">EL SISTEMA ESTÁ DETECTANDO · TELEMETRÍA EN VIVO</div>
+</div>
+<div class="connection">
+<div><span class="dot" id="dot"></span><span id="conn">EN LÍNEA</span></div>
+</div>
+</header>
+
+<main>
+<div class="grid">
+<section class="panel">
+<div class="heading">01 / RADAR DE ACTIVIDAD</div>
+<div class="radar-wrap">
+<div id="mapa"></div>
+<canvas id="radar" width="600" height="600"></canvas>
+</div>
+<div class="radar-label">SENSOR ACTIVO</div>
+<div class="clock-panel"><strong id="clock">--:--:--</strong></div>
+</section>
+
+<section class="panel">
+<div class="heading">02 / ESTADO DEL SISTEMA</div>
+<div id="status" class="status">ESPERANDO SENSOR</div>
+<div class="metrics">
+<div class="metric">
+<div class="label">MAGNITUD</div>
+<div class="value" id="mag">0.000000</div>
+<div class="unit">VALOR RECIBIDO</div>
+</div>
+<div class="metric">
+<div class="label">SEÑAL FILTRADA</div>
+<div class="value" id="fil">0.000000</div>
+<div class="unit">PROMEDIO MÓVIL</div>
+</div>
+<div class="metric">
+<div class="label">NIVEL</div>
+<div class="value" id="lvl">1</div>
+<div class="unit">CLASIFICACIÓN INTERNA</div>
+</div>
+<div class="metric">
+<div class="label">EVENTOS</div>
+<div class="value" id="events">0</div>
+<div class="unit">CONTADOR DE EVENTOS</div>
+</div>
+</div>
+<div class="info-row"><span>INTENSIDAD RELATIVA</span><span id="pct">0%</span></div>
+<div class="bar"><div class="bar-inner" id="bar"></div></div>
+</section>
+
+<section class="panel side">
+<div class="heading">03 / TELEMETRÍA</div>
+<div class="info-row"><span>COMUNICACIÓN</span><span id="network">ESPERANDO</span></div>
+<div class="info-row"><span>CALIBRACIÓN</span><span id="cal">PENDIENTE</span></div>
+<div class="info-row"><span>DIRECCIÓN</span><span id="dir">--</span></div>
+<div class="info-row"><span>PICO DEL EVENTO</span><span id="peak">0.000000</span></div>
+<div class="info-row"><span>DURACIÓN</span><span id="dur">0.00 s</span></div>
+<div class="info-row"><span>ÚLTIMA SEÑAL</span><span id="age">--</span></div>
+<div class="info-row"><span>UMBRAL MOVIMIENTO</span><span>0.035</span></div>
+<div class="info-row"><span>UMBRAL BRUSCO</span><span>0.060</span></div>
+<div class="info-row"><span>UMBRAL ACTIVIDAD SOSTENIDA</span><span>0.060 / 3 s</span></div>
+<div class="info-row"><span>UMBRAL CRÍTICO</span><span>0.150</span></div>
+<div class="heading" style="margin-top:20px">04 / SEÑAL EN VIVO</div>
+<canvas id="history" width="700" height="180"></canvas>
+<div class="info-row"><span>MUESTRAS RECIBIDAS</span><span id="samples">0</span></div>
+<div class="info-row"><span>DESTINATARIOS</span><span id="recipients">0</span></div>
+<div class="info-row"><span>ÚLTIMO CORREO</span><span id="mail">SIN ENVÍOS</span></div>
+</section>
+</div>
+<div class="footer">SEISMIC CORE X // TELEMETRÍA EXPERIMENTAL // NO ES UN SISTEMA OFICIAL DE ALERTA SÍSMICA</div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+
+const mapa=L.map('mapa',{
+    zoomControl:false,
+    attributionControl:false,
+    dragging:false,
+    scrollWheelZoom:false,
+    doubleClickZoom:false,
+    touchZoom:false,
+    keyboard:false
+}).setView([-33.4937,-70.7474],15); // Zoom ajustado a 15 para abarcar más área geográfica
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom:19,
+    crossOrigin:true
+}).addTo(mapa);
+
+L.marker([-33.4937,-70.7474],{
+    icon:L.divIcon({
+        className:'',
+        html:'<div style="width:2px;height:2px;"></div>',
+        iconSize:[2,2],
+        iconAnchor:[1,1]
+    })
+}).addTo(mapa).bindTooltip('PUERTO CÁRDENAS',{
+    permanent:true,
+    direction:'top',
+    offset:[0,-2],
+    className:'street-text-label'
+});
+
+setTimeout(()=>mapa.invalidateSize(),500);
+
+const rc=$('radar').getContext('2d');
+const hc=$('history').getContext('2d');
+
+let angle=0;
+let enabled=false;
+let paused=false;
+let audio=null;
+let lastSweep=-1;
+let level=1;
+let mag=0;
+let radarMag=0;
+let history=Array(120).fill(0);
+let lastStatus='';
+
+function color(l){
+    return l>=4?'#ff355e':
+           l===3?'#ff984a':
+           l===2?'#ffe66d':
+           '#39ff9b';
+}
+
+function beep(f=660,d=.08,v=.03){
+    if(!enabled||paused)return;
+
+    try{
+        if(!audio){
+            audio=new(window.AudioContext||window.webkitAudioContext)();
+        }
+
+        if(audio.state==='suspended'){
+            audio.resume();
+        }
+
+        let o=audio.createOscillator();
+        let g=audio.createGain();
+
+        o.type='sine';
+        o.frequency.value=f;
+
+        g.gain.setValueAtTime(v,audio.currentTime);
+        g.gain.exponentialRampToValueAtTime(
+            .001,
+            audio.currentTime+d
+        );
+
+        o.connect(g);
+        g.connect(audio.destination);
+
+        o.start();
+        o.stop(audio.currentTime+d);
+    }catch(e){}
+}
+
+async function activarAudio(){
+    if(enabled)return;
+
+    try{
+        audio=new(window.AudioContext||window.webkitAudioContext)();
+        await audio.resume();
+        enabled=true;
+        paused=false;
+        beep(880,.12,.045);
+    }catch(e){
+        enabled=false;
+    }
+}
+
+document.addEventListener('pointerdown',activarAudio,{once:true});
+document.addEventListener('keydown',activarAudio,{once:true});
+
+function radar(){
+    let c=300;
+    let r=250;
+
+    rc.clearRect(0,0,600,600);
+    rc.strokeStyle='#39ff9b66';
+    rc.lineWidth=1;
+
+    for(let i=1;i<=4;i++){
+        rc.beginPath();
+        rc.arc(c,c,r*i/4,0,Math.PI*2);
+        rc.stroke();
+    }
+
+    rc.beginPath();
+    rc.moveTo(c-r,c);
+    rc.lineTo(c+r,c);
+    rc.moveTo(c,c-r);
+    rc.lineTo(c,c+r);
+    rc.stroke();
+
+    rc.save();
+    rc.font='700 13px Inter, Arial, sans-serif';
+    rc.fillStyle='#63f5b0';
+    rc.textAlign='center';
+    rc.textBaseline='middle';
+    rc.shadowBlur=8;
+    rc.shadowColor='#39ff9b';
+    rc.fillText('N', c, c - r + 15);
+    rc.fillText('S', c, c + r - 15);
+    rc.fillText('E', c + r - 15, c);
+    rc.fillText('O', c - r + 15, c);
+    rc.restore();
+
+    let g=rc.createConicGradient(angle,c,c);
+    g.addColorStop(0,'#39ff9b66');
+    g.addColorStop(.18,'#39ff9b15');
+    g.addColorStop(.25,'#39ff9b00');
+    g.addColorStop(1,'#39ff9b00');
+
+    rc.fillStyle=g;
+    rc.beginPath();
+    rc.moveTo(c,c);
+    rc.arc(c,c,r,0,Math.PI*2);
+    rc.fill();
+
+    rc.strokeStyle='#39ff9b';
+    rc.lineWidth=2;
+    rc.beginPath();
+    rc.moveTo(c,c);
+    rc.lineTo(
+        c+Math.cos(angle)*r,
+        c+Math.sin(angle)*r
+    );
+    rc.stroke();
+
+    if(radarMag>=.008){
+        let p=Math.min(
+            .88,
+            Math.max(.12,radarMag/.2)
+        );
+
+        let x=c+Math.cos(-.62)*r*p;
+        let y=c+Math.sin(-.62)*r*p;
+
+        rc.save();
+        rc.shadowBlur=24;
+        rc.shadowColor=color(level);
+        rc.fillStyle=color(level);
+        rc.beginPath();
+        rc.arc(x,y,level>=3?9:6,0,Math.PI*2);
+        rc.fill();
+        rc.restore();
+    }
+
+    angle+=.012;
+
+    let b=Math.floor(angle/(2*Math.PI));
+
+    if(b!==lastSweep){
+        lastSweep=b;
+        beep();
+    }
+
+    requestAnimationFrame(radar);
+}
+
+function graph(){
+    hc.clearRect(0,0,700,180);
+    hc.fillStyle='#03111b';
+    hc.fillRect(0,0,700,180);
+
+    hc.strokeStyle='#123040';
+
+    for(let y=30;y<180;y+=30){
+        hc.beginPath();
+        hc.moveTo(0,y);
+        hc.lineTo(700,y);
+        hc.stroke();
+    }
+
+    hc.strokeStyle=color(level);
+    hc.lineWidth=2;
+    hc.beginPath();
+
+    history.forEach((v,i)=>{
+        let x=i*700/(history.length-1);
+        let y=172-Math.min(1,Math.abs(v)/.2)*164;
+
+        if(i){
+            hc.lineTo(x,y);
+        }else{
+            hc.moveTo(x,y);
+        }
+    });
+
+    hc.stroke();
+}
+
+async function refresh(){
+    try{
+        let r=await fetch('/estado',{cache:'no-store'});
+
+        if(!r.ok){
+            throw Error(r.status);
+        }
+
+        let d=await r.json();
+        let on=!!d.conexion;
+
+        $('conn').textContent=on
+            ?'EN LÍNEA'
+            :(d.conexion_texto||'SIN DATOS');
+
+        $('dot').style.background=on
+            ?'#39ff9b'
+            :'#ff355e';
+
+        $('network').textContent=on
+            ?'EN LÍNEA'
+            :'SIN COMUNICACIÓN';
+
+        let s=$('status');
+        s.textContent=d.estado||'ESPERANDO SENSOR';
+        s.className='status';
+
+        level=Number(d.nivel||1);
+
+        if(!on){
+            s.classList.add('offline');
+        }else if(level===2){
+            s.classList.add('level2');
+        }else if(level===3){
+            s.classList.add('level3');
+        }else if(level>=4){
+            s.classList.add('level4');
+        }
+
+        mag=Number(d.filtrada||0);
+        radarMag=Number(d.actual??d.magnitud??0);
+
+        $('mag').textContent=radarMag.toFixed(6);
+        $('fil').textContent=mag.toFixed(6);
+        $('lvl').textContent=level;
+        $('events').textContent=d.eventos||0;
+        $('cal').textContent=d.calibrando?'EN CURSO':'COMPLETADA';
+        $('dir').textContent=d.direccion||'--';
+
+        $('peak').textContent=Number(
+            d.maximo_evento||0
+        ).toFixed(6);
+
+        $('dur').textContent=Number(
+            d.duracion_evento||0
+        ).toFixed(2)+' s';
+
+        $('samples').textContent=d.muestras||0;
+
+        $('age').textContent=d.tiempo_activo==null
+            ?'--'
+            :Number(d.tiempo_activo).toFixed(1)+' s';
+
+        $('recipients').textContent=d.destinatarios_configurados??0;
+
+        let m=d.correo||{};
+
+        $('mail').textContent=m.tipo
+            ?(m.ok?'OK: ':'ERROR: ')+m.tipo
+            :'SIN ENVÍOS';
+
+        let p=Math.min(
+            100,
+            Math.max(0,mag/.2*100)
+        );
+
+        $('pct').textContent=p.toFixed(1)+'%';
+        $('bar').style.width=p+'%';
+        $('bar').style.background=color(level);
+
+        history.push(mag);
+
+        if(history.length>120){
+            history.shift();
+        }
+
+        graph();
+
+        if(lastStatus&&lastStatus!==d.estado&&enabled){
+            if(level>=4){
+                beep(180,.45,.12);
+            }else if(level===3){
+                beep(300,.22,.08);
+            }else if(level===2){
+                beep(460,.12,.05);
+            }else{
+                beep(720,.08,.025);
+            }
+        }
+
+        lastStatus=d.estado||'';
+
+    }catch(e){
+        $('conn').textContent='ERROR DE CONEXIÓN';
+        $('network').textContent='ERROR';
+    }
+}
+
+$('clock').textContent=new Date().toLocaleTimeString(
+    'es-CL',
+    {hour12:false}
+);
+
+setInterval(()=>{
+    $('clock').textContent=new Date().toLocaleTimeString(
+        'es-CL',
+        {hour12:false}
+    );
+},1000);
+
+setInterval(refresh,200);
+
+radar();
+graph();
+refresh();
+</script>
+</body>
+</html>'''
+
+
+@app.route('/', methods=['GET'])
+def index():
+    return Response(
+        PAGINA,
+        mimetype='text/html; charset=utf-8'
+    )
+
+
+if __name__ == '__main__':
+    app.run(
+        host='0.0.0.0',
+        port=int(os.environ.get('PORT', '10000'))
+    )
