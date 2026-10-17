@@ -538,15 +538,15 @@ main{padding:16px;max-width:1800px;margin:auto}
 .panel{position:relative;background:linear-gradient(145deg,rgba(12,29,43,.96),rgba(5,15,25,.96));border:1px solid #203d4d;border-radius:13px;padding:17px;min-width:0;box-shadow:0 12px 35px #0003,inset 0 1px #ffffff08}
 .panel:before{content:'';position:absolute;top:-1px;left:15px;width:66px;border-top:2px solid var(--cyan);opacity:.8}
 .heading{font-size:10px;color:#9dc8d8;letter-spacing:2px;margin-bottom:16px;font-weight:700}
-.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:#07111a;border:1px solid rgba(99,245,176,.48);box-shadow:0 0 0 5px rgba(7,19,29,.96),0 0 0 6px rgba(67,202,191,.34),0 0 34px rgba(0,166,255,.12),inset 0 0 35px #0009}
-#mapa{position:absolute;inset:0;z-index:1;background:#071722;isolation:isolate;border-radius:50%;overflow:hidden}
-#mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 25% 22%,rgba(34,235,163,.12) 0%,transparent 46%),radial-gradient(ellipse at 78% 76%,rgba(0,145,255,.16) 0%,transparent 58%),linear-gradient(145deg,rgba(4,25,36,.04),rgba(1,9,24,.24));mix-blend-mode:screen}
-#mapa .leaflet-tile-pane{filter:saturate(1.34) hue-rotate(8deg) brightness(1.08) contrast(1.08);opacity:.98}
+.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(5,28,22,.92);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
+#mapa{position:absolute;inset:0;z-index:1;background:#03120d;isolation:isolate;border-radius:50%;overflow:hidden}
+#mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 35% 30%,rgba(63,245,176,.18) 0%,transparent 55%),radial-gradient(ellipse at 70% 70%,rgba(100,232,255,.12) 0%,transparent 65%),linear-gradient(145deg,rgba(4,38,28,.15),rgba(1,14,10,.35));mix-blend-mode:screen}
+#mapa .leaflet-tile-pane{filter:saturate(1.5) hue-rotate(130deg) brightness(0.9) contrast(1.2);opacity:.92}
 #radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent;pointer-events:none}
-.leaflet-container{background:#071722!important}
-.leaflet-control-attribution{font-size:7px!important;background:rgba(4,13,23,.72)!important;color:#b8d9df!important;border:1px solid rgba(95,195,205,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
+.leaflet-container{background:#03120d!important}
+.leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
 .leaflet-control-attribution a{color:#81e9d0!important}
-.map-label{background:linear-gradient(135deg,rgba(4,28,35,.88),rgba(5,22,43,.88));backdrop-filter:blur(10px);border:1px solid rgba(103,232,205,.58);border-radius:8px;color:#e2fff7;padding:7px 10px;font:650 9px Inter,Arial,sans-serif;letter-spacing:1px;white-space:nowrap;box-shadow:0 4px 18px rgba(0,0,0,.28),0 0 14px rgba(34,220,174,.13);text-shadow:0 1px 5px #00151b}
+.map-label{background:linear-gradient(135deg,rgba(4,35,28,.92),rgba(5,22,35,.92));backdrop-filter:blur(10px);border:1px solid rgba(99,245,176,.75);border-radius:8px;color:#e2fff7;padding:6px 10px;font:650 9px Inter,Arial,sans-serif;letter-spacing:1px;white-space:nowrap;box-shadow:0 4px 18px rgba(0,0,0,.35),0 0 16px rgba(99,245,176,.25);text-shadow:0 1px 5px #00151b}
 .radar-label{text-align:center;color:#c8eee7;font-size:11px;font-weight:650;margin-top:17px;letter-spacing:1.8px;text-shadow:0 0 14px rgba(45,220,180,.16)}
 .status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}
 .level2{color:var(--yellow)!important;border-color:var(--yellow)!important}
@@ -591,7 +591,7 @@ main{padding:16px;max-width:1800px;margin:auto}
 <div id="mapa"></div>
 <canvas id="radar" width="600" height="600"></canvas>
 </div>
-<div class="radar-label">ESTACIÓN DE MONITOREO · EN VIVO</div>
+<div class="radar-label">MAIPÚ · PUERTO CÁRDENAS</div>
 <div class="clock-panel"><strong id="clock">--:--:--</strong></div>
 </section>
 
@@ -650,29 +650,34 @@ main{padding:16px;max-width:1800px;margin:auto}
 <script>
 const $=id=>document.getElementById(id);
 
-// Centro aproximado del sector Pasaje Puerto Cárdenas / Población Oreste Plath, Maipú.
-// Es una referencia aproximada del mapa, no una coordenada GPS confirmada del sensor.
 const mapa=L.map('mapa',{
     zoomControl:false,
-    attributionControl:true,
+    attributionControl:false,
     dragging:false,
     scrollWheelZoom:false,
     doubleClickZoom:false,
     touchZoom:false,
     keyboard:false
-}).setView([-33.4937,-70.7474],17);
+}).setView([-33.4937,-70.7474],16);
 
-// CARTO oscuro + OpenStreetMap. No requiere API key.
-// Sin marcador ni etiqueta especial: Puerto Cárdenas aparece como una calle más.
-L.tileLayer(
-    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {
-        subdomains:'abcd',
-        maxZoom:20,
-        attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        crossOrigin:true
-    }
-).addTo(mapa);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{
+    maxZoom:19,
+    crossOrigin:true
+}).addTo(mapa);
+
+L.marker([-33.4937,-70.7474],{
+    icon:L.divIcon({
+        className:'',
+        html:'<div style="width:10px;height:10px;background:#64e8ff;border-radius:50%;box-shadow:0 0 12px #64e8ff,0 0 24px #64e8ff"></div>',
+        iconSize:[10,10],
+        iconAnchor:[5,5]
+    })
+}).addTo(mapa).bindTooltip('PUERTO CÁRDENAS',{
+    permanent:true,
+    direction:'top',
+    offset:[0,-6],
+    className:'map-label'
+});
 
 setTimeout(()=>mapa.invalidateSize(),500);
 
@@ -751,7 +756,7 @@ function radar(){
     let r=250;
 
     rc.clearRect(0,0,600,600);
-    rc.strokeStyle='#39ff9b55';
+    rc.strokeStyle='#39ff9b66';
     rc.lineWidth=1;
 
     for(let i=1;i<=4;i++){
@@ -768,8 +773,8 @@ function radar(){
     rc.stroke();
 
     let g=rc.createConicGradient(angle,c,c);
-    g.addColorStop(0,'#39ff9b55');
-    g.addColorStop(.18,'#39ff9b10');
+    g.addColorStop(0,'#39ff9b66');
+    g.addColorStop(.18,'#39ff9b15');
     g.addColorStop(.25,'#39ff9b00');
     g.addColorStop(1,'#39ff9b00');
 
