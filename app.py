@@ -703,4 +703,285 @@ function beep(f=660,d=.08,v=.03){
         let g=audio.createGain();
 
         o.type='sine';
-        o.frequency.
+        o.frequency.value=f;
+
+        g.gain.setValueAtTime(v,audio.currentTime);
+        g.gain.exponentialRampToValueAtTime(
+            .001,
+            audio.currentTime+d
+        );
+
+        o.connect(g);
+        g.connect(audio.destination);
+
+        o.start();
+        o.stop(audio.currentTime+d);
+    }catch(e){}
+}
+
+async function activarAudio(){
+    if(enabled)return;
+
+    try{
+        audio=new(window.AudioContext||window.webkitAudioContext)();
+        await audio.resume();
+        enabled=true;
+        paused=false;
+        beep(880,.12,.045);
+    }catch(e){
+        enabled=false;
+    }
+}
+
+document.addEventListener('pointerdown',activarAudio,{once:true});
+document.addEventListener('keydown',activarAudio,{once:true});
+
+function radar(){
+    let c=300;
+    let r=250;
+
+    rc.clearRect(0,0,600,600);
+    rc.strokeStyle='#39ff9b66';
+    rc.lineWidth=1;
+
+    for(let i=1;i<=4;i++){
+        rc.beginPath();
+        rc.arc(c,c,r*i/4,0,Math.PI*2);
+        rc.stroke();
+    }
+
+    rc.beginPath();
+    rc.moveTo(c-r,c);
+    rc.lineTo(c+r,c);
+    rc.moveTo(c,c-r);
+    rc.lineTo(c,c+r);
+    rc.stroke();
+
+    let g=rc.createConicGradient(angle,c,c);
+    g.addColorStop(0,'#39ff9b66');
+    g.addColorStop(.18,'#39ff9b15');
+    g.addColorStop(.25,'#39ff9b00');
+    g.addColorStop(1,'#39ff9b00');
+
+    rc.fillStyle=g;
+    rc.beginPath();
+    rc.moveTo(c,c);
+    rc.arc(c,c,r,0,Math.PI*2);
+    rc.fill();
+
+    rc.strokeStyle='#39ff9b';
+    rc.lineWidth=2;
+    rc.beginPath();
+    rc.moveTo(c,c);
+    rc.lineTo(
+        c+Math.cos(angle)*r,
+        c+Math.sin(angle)*r
+    );
+    rc.stroke();
+
+    if(radarMag>=.008){
+        let p=Math.min(
+            .88,
+            Math.max(.12,radarMag/.2)
+        );
+
+        let x=c+Math.cos(-.62)*r*p;
+        let y=c+Math.sin(-.62)*r*p;
+
+        rc.save();
+        rc.shadowBlur=24;
+        rc.shadowColor=color(level);
+        rc.fillStyle=color(level);
+        rc.beginPath();
+        rc.arc(x,y,level>=3?9:6,0,Math.PI*2);
+        rc.fill();
+        rc.restore();
+    }
+
+    angle+=.012;
+
+    let b=Math.floor(angle/(2*Math.PI));
+
+    if(b!==lastSweep){
+        lastSweep=b;
+        beep();
+    }
+
+    requestAnimationFrame(radar);
+}
+
+function graph(){
+    hc.clearRect(0,0,700,180);
+    hc.fillStyle='#03111b';
+    hc.fillRect(0,0,700,180);
+
+    hc.strokeStyle='#123040';
+
+    for(let y=30;y<180;y+=30){
+        hc.beginPath();
+        hc.moveTo(0,y);
+        hc.lineTo(700,y);
+        hc.stroke();
+    }
+
+    hc.strokeStyle=color(level);
+    hc.lineWidth=2;
+    hc.beginPath();
+
+    history.forEach((v,i)=>{
+        let x=i*700/(history.length-1);
+        let y=172-Math.min(1,Math.abs(v)/.2)*164;
+
+        if(i){
+            hc.lineTo(x,y);
+        }else{
+            hc.moveTo(x,y);
+        }
+    });
+
+    hc.stroke();
+}
+
+async function refresh(){
+    try{
+        let r=await fetch('/estado',{cache:'no-store'});
+
+        if(!r.ok){
+            throw Error(r.status);
+        }
+
+        let d=await r.json();
+        let on=!!d.conexion;
+
+        $('conn').textContent=on
+            ?'EN LÍNEA'
+            :(d.conexion_texto||'SIN DATOS');
+
+        $('dot').style.background=on
+            ?'#39ff9b'
+            :'#ff355e';
+
+        $('network').textContent=on
+            ?'EN LÍNEA'
+            :'SIN COMUNICACIÓN';
+
+        let s=$('status');
+        s.textContent=d.estado||'ESPERANDO SENSOR';
+        s.className='status';
+
+        level=Number(d.nivel||1);
+
+        if(!on){
+            s.classList.add('offline');
+        }else if(level===2){
+            s.classList.add('level2');
+        }else if(level===3){
+            s.classList.add('level3');
+        }else if(level>=4){
+            s.classList.add('level4');
+        }
+
+        mag=Number(d.filtrada||0);
+        radarMag=Number(d.actual??d.magnitud??0);
+
+        $('mag').textContent=radarMag.toFixed(6);
+        $('fil').textContent=mag.toFixed(6);
+        $('lvl').textContent=level;
+        $('events').textContent=d.eventos||0;
+        $('cal').textContent=d.calibrando?'EN CURSO':'COMPLETADA';
+        $('dir').textContent=d.direccion||'--';
+
+        $('peak').textContent=Number(
+            d.maximo_evento||0
+        ).toFixed(6);
+
+        $('dur').textContent=Number(
+            d.duracion_evento||0
+        ).toFixed(2)+' s';
+
+        $('samples').textContent=d.muestras||0;
+
+        $('age').textContent=d.tiempo_activo==null
+            ?'--'
+            :Number(d.tiempo_activo).toFixed(1)+' s';
+
+        $('recipients').textContent=d.destinatarios_configurados??0;
+
+        let m=d.correo||{};
+
+        $('mail').textContent=m.tipo
+            ?(m.ok?'OK: ':'ERROR: ')+m.tipo
+            :'SIN ENVÍOS';
+
+        let p=Math.min(
+            100,
+            Math.max(0,mag/.2*100)
+        );
+
+        $('pct').textContent=p.toFixed(1)+'%';
+        $('bar').style.width=p+'%';
+        $('bar').style.background=color(level);
+
+        history.push(mag);
+
+        if(history.length>120){
+            history.shift();
+        }
+
+        graph();
+
+        if(lastStatus&&lastStatus!==d.estado&&enabled){
+            if(level>=4){
+                beep(180,.45,.12);
+            }else if(level===3){
+                beep(300,.22,.08);
+            }else if(level===2){
+                beep(460,.12,.05);
+            }else{
+                beep(720,.08,.025);
+            }
+        }
+
+        lastStatus=d.estado||'';
+
+    }catch(e){
+        $('conn').textContent='ERROR DE CONEXIÓN';
+        $('network').textContent='ERROR';
+    }
+}
+
+$('clock').textContent=new Date().toLocaleTimeString(
+    'es-CL',
+    {hour12:false}
+);
+
+setInterval(()=>{
+    $('clock').textContent=new Date().toLocaleTimeString(
+        'es-CL',
+        {hour12:false}
+    );
+},1000);
+
+setInterval(refresh,200);
+
+radar();
+graph();
+refresh();
+</script>
+</body>
+</html>'''
+
+
+@app.route('/', methods=['GET'])
+def index():
+    return Response(
+        PAGINA,
+        mimetype='text/html; charset=utf-8'
+    )
+
+
+if __name__ == '__main__':
+    app.run(
+        host='0.0.0.0',
+        port=int(os.environ.get('PORT', '10000'))
+    )
