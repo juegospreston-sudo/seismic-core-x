@@ -541,8 +541,8 @@ main{padding:16px;max-width:1800px;margin:auto}
 .radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(5,28,22,.92);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
 #mapa{position:absolute;inset:0;z-index:1;background:#03120d;isolation:isolate;border-radius:50%;overflow:hidden}
 #mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 35% 30%,rgba(63,245,176,.18) 0%,transparent 55%),radial-gradient(ellipse at 70% 70%,rgba(100,232,255,.12) 0%,transparent 65%),linear-gradient(145deg,rgba(4,38,28,.15),rgba(1,14,10,.35));mix-blend-mode:screen}
-/* Letras y nombres de calles con mayor brillo y contraste */
-#mapa .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(0.85) contrast(1.7) saturate(1.4);opacity:.95}
+/* Letras de las calles ultra blancas, con gran brillo y contraste */
+#mapa .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(1.3) contrast(2.2) saturate(1.6);opacity:.98}
 #radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent;pointer-events:none}
 .leaflet-container{background:#03120d!important}
 .leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
@@ -658,7 +658,7 @@ const mapa=L.map('mapa',{
     doubleClickZoom:false,
     touchZoom:false,
     keyboard:false
-}).setView([-33.4937,-70.7474],16); // Zoom ajustado a 16 para abarcar más área y mostrar Puerto Cárdenas
+}).setView([-33.4937,-70.7474],16.5);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
@@ -835,168 +835,4 @@ function graph(){
     for(let y=30;y<180;y+=30){
         hc.beginPath();
         hc.moveTo(0,y);
-        hc.lineTo(700,y);
-        hc.stroke();
-    }
-
-    hc.strokeStyle=color(level);
-    hc.lineWidth=2;
-    hc.beginPath();
-
-    history.forEach((v,i)=>{
-        let x=i*700/(history.length-1);
-        let y=172-Math.min(1,Math.abs(v)/.2)*164;
-
-        if(i){
-            hc.lineTo(x,y);
-        }else{
-            hc.moveTo(x,y);
-        }
-    });
-
-    hc.stroke();
-}
-
-async function refresh(){
-    try{
-        let r=await fetch('/estado',{cache:'no-store'});
-
-        if(!r.ok){
-            throw Error(r.status);
-        }
-
-        let d=await r.json();
-        let on=!!d.conexion;
-
-        $('conn').textContent=on
-            ?'EN LÍNEA'
-            :(d.conexion_texto||'SIN DATOS');
-
-        $('dot').style.background=on
-            ?'#39ff9b'
-            :'#ff355e';
-
-        $('network').textContent=on
-            ?'EN LÍNEA'
-            :'SIN COMUNICACIÓN';
-
-        let s=$('status');
-        s.textContent=d.estado||'ESPERANDO SENSOR';
-        s.className='status';
-
-        level=Number(d.nivel||1);
-
-        if(!on){
-            s.classList.add('offline');
-        }else if(level===2){
-            s.classList.add('level2');
-        }else if(level===3){
-            s.classList.add('level3');
-        }else if(level>=4){
-            s.classList.add('level4');
-        }
-
-        mag=Number(d.filtrada||0);
-        radarMag=Number(d.actual??d.magnitud??0);
-
-        $('mag').textContent=radarMag.toFixed(6);
-        $('fil').textContent=mag.toFixed(6);
-        $('lvl').textContent=level;
-        $('events').textContent=d.eventos||0;
-        $('cal').textContent=d.calibrando?'EN CURSO':'COMPLETADA';
-        $('dir').textContent=d.direccion||'--';
-
-        $('peak').textContent=Number(
-            d.maximo_evento||0
-        ).toFixed(6);
-
-        $('dur').textContent=Number(
-            d.duracion_evento||0
-        ).toFixed(2)+' s';
-
-        $('samples').textContent=d.muestras||0;
-
-        $('age').textContent=d.tiempo_activo==null
-            ?'--'
-            :Number(d.tiempo_activo).toFixed(1)+' s';
-
-        $('recipients').textContent=d.destinatarios_configurados??0;
-
-        let m=d.correo||{};
-
-        $('mail').textContent=m.tipo
-            ?(m.ok?'OK: ':'ERROR: ')+m.tipo
-            :'SIN ENVÍOS';
-
-        let p=Math.min(
-            100,
-            Math.max(0,mag/.2*100)
-        );
-
-        $('pct').textContent=p.toFixed(1)+'%';
-        $('bar').style.width=p+'%';
-        $('bar').style.background=color(level);
-
-        history.push(mag);
-
-        if(history.length>120){
-            history.shift();
-        }
-
-        graph();
-
-        if(lastStatus&&lastStatus!==d.estado&&enabled){
-            if(level>=4){
-                beep(180,.45,.12);
-            }else if(level===3){
-                beep(300,.22,.08);
-            }else if(level===2){
-                beep(460,.12,.05);
-            }else{
-                beep(720,.08,.025);
-            }
-        }
-
-        lastStatus=d.estado||'';
-
-    }catch(e){
-        $('conn').textContent='ERROR DE CONEXIÓN';
-        $('network').textContent='ERROR';
-    }
-}
-
-$('clock').textContent=new Date().toLocaleTimeString(
-    'es-CL',
-    {hour12:false}
-);
-
-setInterval(()=>{
-    $('clock').textContent=new Date().toLocaleTimeString(
-        'es-CL',
-        {hour12:false}
-    );
-},1000);
-
-setInterval(refresh,200);
-
-radar();
-graph();
-refresh();
-</script>
-</body>
-</html>'''
-
-
-@app.route('/', methods=['GET'])
-def index():
-    return Response(
-        PAGINA,
-        mimetype='text/html; charset=utf-8'
-    )
-
-
-if __name__ == '__main__':
-    app.run(
-        host='0.0.0.0',
-        port=int(os.environ.get('PORT', '10000'))
-    )
+        hc.
