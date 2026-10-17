@@ -546,7 +546,6 @@ main{padding:16px;max-width:1800px;margin:auto}
 .leaflet-container{background:#03120d!important}
 .leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
 .leaflet-control-attribution a{color:#81e9d0!important}
-.map-label{background:rgba(5,28,22,.85);backdrop-filter:blur(6px);border:1px solid rgba(99,245,176,.35);border-radius:4px;color:#a8f0d0;padding:2px 6px;font:650 8px Inter,Arial,sans-serif;letter-spacing:1px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .radar-label{text-align:center;color:#c8eee7;font-size:12px;font-weight:700;margin-top:17px;letter-spacing:1.8px;text-shadow:0 0 14px rgba(45,220,180,.16)}
 .status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}
 .level2{color:var(--yellow)!important;border-color:var(--yellow)!important}
@@ -664,21 +663,6 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
     crossOrigin:true
 }).addTo(mapa);
-
-// Etiqueta discreta e integrada para identificar Puerto Cárdenas en el mapa
-L.marker([-33.4937,-70.7474],{
-    icon:L.divIcon({
-        className:'',
-        html:'<div style="width:4px;height:4px;background:#63f5b0;border-radius:50%;"></div>',
-        iconSize:[4,4],
-        iconAnchor:[2,2]
-    })
-}).addTo(mapa).bindTooltip('PASAJE PUERTO CÁRDENAS',{
-    permanent:true,
-    direction:'top',
-    offset:[0,-4],
-    className:'map-label'
-});
 
 setTimeout(()=>mapa.invalidateSize(),500);
 
