@@ -2,10 +2,8 @@ from flask import Flask, request, jsonify, Response
 from collections import deque
 from threading import Lock, Thread
 import json, math, os, time, urllib.request, urllib.error, html
-from flask_socketio import SocketIO
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 
 # SEISMIC CORE X — umbrales experimentales originales
 UMBRAL_VIBRACION = 0.035
@@ -178,8 +176,6 @@ def enviar_alerta_async(tipo, asunto, cantidad, cuerpo):
             todo_ok,
             ' | '.join(resultados)
         )
-        with lock:
-            socketio.emit('estado', construir_estado())
 
     Thread(target=trabajo, daemon=True).start()
 
@@ -435,34 +431,6 @@ def construir_estado():
     }
 
 
-PAGINA = r"""<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SEISMIC CORE X</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>
-:root{--cyan:#64e8ff;--green:#63f5b0;--yellow:#ffd66b;--orange:#ff984a;--red:#ff355e;--muted:#8299a8}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#102637,#07111c 50%,#03070d);color:#e5f2f7;font-family:Segoe UI,Arial,sans-serif}header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;background:#030a11e8;border-bottom:1px solid #203c4b}.logo{font-size:clamp(22px,3vw,35px);font-weight:800;letter-spacing:3px;color:var(--cyan)}.sub,.heading,.label{color:var(--muted);font-size:10px;letter-spacing:1.5px}.connection{font-size:12px;color:var(--yellow)}main{padding:15px;max-width:1800px;margin:auto}.grid{display:grid;grid-template-columns:1.1fr 1fr .9fr;gap:14px}.panel{background:linear-gradient(145deg,#0c1d2bf5,#050f19f5);border:1px solid #203d4d;border-radius:13px;padding:16px;min-width:0}.heading{margin-bottom:15px;color:#9dc8d8;font-weight:bold}.radar-wrap{position:relative;width:100%;max-width:460px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;border:2px solid #39ff9b88;box-shadow:0 0 35px #39ff9b22}#mapa,#radar{position:absolute;inset:0;width:100%;height:100%}#radar{pointer-events:none;z-index:400}.radar-label{text-align:center;color:#c8eee7;font-size:12px;margin:15px 0;letter-spacing:2px}.clock{text-align:center;color:var(--cyan);font-size:26px;letter-spacing:3px;padding:12px;border:1px solid #1b3949}.status{text-align:center;padding:15px 5px;border:1px solid var(--green);color:var(--green);font-weight:bold;margin-bottom:12px}.level2{color:var(--yellow)!important;border-color:var(--yellow)!important}.level3{color:var(--orange)!important;border-color:var(--orange)!important}.level4{color:var(--red)!important;border-color:var(--red)!important;animation:blink .7s infinite}.offline{color:var(--muted)!important;border-color:var(--muted)!important}@keyframes blink{50%{opacity:.45}}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px}.metric{background:#000a14;border:1px solid #103346;padding:12px;min-height:82px}.value{font-size:clamp(20px,2.4vw,29px);margin-top:9px;color:var(--cyan)}.unit{font-size:10px;color:var(--muted)}.info-row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #123040;font-size:11px}.info-row span:first-child{color:var(--muted)}.info-row span:last-child{text-align:right;overflow-wrap:anywhere}.bar{height:7px;background:#102c3b;margin:10px 0}.bar-inner{height:100%;width:0;background:var(--cyan);transition:width .2s}#history{width:100%;height:100px;background:#03111b;border:1px solid #103346}.footer{text-align:center;color:#527d8c;font-size:10px;padding:18px 5px;letter-spacing:1px}.socket-status{font-size:10px;color:var(--muted);margin-top:6px}@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.side{grid-column:1/-1}}@media(max-width:680px){header{align-items:flex-start;flex-direction:column;gap:10px}.grid{grid-template-columns:1fr}.side{grid-column:auto}main{padding:8px}}
-</style></head><body><header><div><div class="logo">SEISMIC CORE X</div><div class="sub">TELEMETRÍA EN TIEMPO REAL · WEBSOCKET</div></div><div class="connection"><span id="dot">●</span> <span id="conn">CONECTANDO...</span><div class="socket-status" id="ws">Canal en preparación</div></div></header>
-<main><div class="grid"><section class="panel"><div class="heading">01 / RADAR DE ACTIVIDAD</div><div class="radar-wrap"><div id="mapa"></div><canvas id="radar" width="600" height="600"></canvas></div><div class="radar-label">SENSOR ACTIVO</div><div class="clock" id="clock">--:--:--</div></section>
-<section class="panel"><div class="heading">02 / ESTADO DEL SISTEMA</div><div id="status" class="status offline">ESPERANDO SENSOR</div><div class="metrics"><div class="metric"><div class="label">MAGNITUD</div><div id="mag" class="value">0.000000</div><div class="unit">VALOR RECIBIDO</div></div><div class="metric"><div class="label">SEÑAL FILTRADA</div><div id="fil" class="value">0.000000</div><div class="unit">PROMEDIO MÓVIL</div></div><div class="metric"><div class="label">NIVEL</div><div id="lvl" class="value">1</div><div class="unit">CLASIFICACIÓN INTERNA</div></div><div class="metric"><div class="label">EVENTOS</div><div id="events" class="value">0</div><div class="unit">CONTADOR DE EVENTOS</div></div></div><div class="info-row"><span>INTENSIDAD RELATIVA</span><span id="pct">0%</span></div><div class="bar"><div id="bar" class="bar-inner"></div></div><div class="info-row"><span>EVENTO ACTIVO</span><span id="event">NO</span></div></section>
-<section class="panel side"><div class="heading">03 / TELEMETRÍA</div><div class="info-row"><span>COMUNICACIÓN SENSOR</span><span id="network">ESPERANDO</span></div><div class="info-row"><span>CALIBRACIÓN</span><span id="cal">PENDIENTE</span></div><div class="info-row"><span>DIRECCIÓN</span><span id="dir">--</span></div><div class="info-row"><span>PICO DEL EVENTO</span><span id="peak">0.000000</span></div><div class="info-row"><span>DURACIÓN</span><span id="dur">0.00 s</span></div><div class="info-row"><span>ÚLTIMA SEÑAL</span><span id="age">--</span></div><div class="info-row"><span>UMBRAL MOVIMIENTO</span><span>0.035</span></div><div class="info-row"><span>UMBRAL BRUSCO</span><span>0.060</span></div><div class="info-row"><span>ACTIVIDAD SOSTENIDA</span><span>0.060 / 3 s</span></div><div class="info-row"><span>UMBRAL CRÍTICO</span><span>0.150</span></div><div class="heading" style="margin-top:18px">04 / SEÑAL EN VIVO</div><canvas id="history" width="700" height="180"></canvas><div class="info-row"><span>MUESTRAS RECIBIDAS</span><span id="samples">0</span></div><div class="info-row"><span>DESTINATARIOS</span><span id="recipients">0</span></div><div class="info-row"><span>ÚLTIMO CORREO</span><span id="mail">SIN ENVÍOS</span></div></section></div><div class="footer">SEISMIC CORE X // MONITOR EXPERIMENTAL // NO ES UN SISTEMA OFICIAL DE ALERTA SÍSMICA</div></main>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script><script>
-const $=id=>document.getElementById(id);const map=L.map('mapa',{zoomControl:false,attributionControl:true,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,keyboard:false}).setView([-33.4937,-70.7474],15);L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OpenStreetMap © CARTO'}).addTo(map);setTimeout(()=>map.invalidateSize(),500);
-const rc=$('radar').getContext('2d'),hc=$('history').getContext('2d');let angle=0,level=1,mag=0,radarMag=0,history=Array(120).fill(0),lastData=0;
-function radar(){const w=rc.canvas.width,h=rc.canvas.height,cx=w/2,cy=h/2,r=Math.min(w,h)*.47;rc.clearRect(0,0,w,h);rc.save();rc.translate(cx,cy);rc.strokeStyle='rgba(57,255,155,.28)';rc.lineWidth=1;for(let f of [.25,.5,.75,1]){rc.beginPath();rc.arc(0,0,r*f,0,Math.PI*2);rc.stroke()}rc.beginPath();rc.moveTo(-r,0);rc.lineTo(r,0);rc.moveTo(0,-r);rc.lineTo(0,r);rc.stroke();const g=rc.createConicGradient(angle,0,0);g.addColorStop(0,'rgba(57,255,155,0)');g.addColorStop(.82,'rgba(57,255,155,0)');g.addColorStop(1,'rgba(57,255,155,.35)');rc.fillStyle=g;rc.beginPath();rc.arc(0,0,r,0,Math.PI*2);rc.fill();rc.rotate(angle);rc.strokeStyle='rgba(99,255,190,.95)';rc.beginPath();rc.moveTo(0,0);rc.lineTo(r,0);rc.stroke();if(radarMag>.012){rc.fillStyle=level>=4?'#ff355e':level===3?'#ff984a':level===2?'#ffe66d':'#39ff9b';rc.shadowBlur=18;rc.shadowColor=rc.fillStyle;rc.beginPath();rc.arc(r*.48,0,Math.min(13,4+radarMag*50),0,Math.PI*2);rc.fill()}rc.restore();angle=(angle+.012)%(Math.PI*2);requestAnimationFrame(radar)}radar();
-function drawHistory(){const w=hc.canvas.width,h=hc.canvas.height;hc.clearRect(0,0,w,h);hc.strokeStyle='#103346';for(let y=0;y<h;y+=30){hc.beginPath();hc.moveTo(0,y);hc.lineTo(w,y);hc.stroke()}hc.strokeStyle='#64e8ff';hc.lineWidth=2;hc.beginPath();history.forEach((v,i)=>{const x=i*w/(history.length-1),y=h-Math.min(1,v/.2)*(h-8)-4;if(i===0)hc.moveTo(x,y);else hc.lineTo(x,y)});hc.stroke()}
-function paint(d){if(!d)return;lastData=Date.now();level=Number(d.nivel||1);mag=Number(d.magnitud||0);radarMag=Number(d.filtrada||mag);$('conn').textContent=d.conexion_texto||'EN LÍNEA';$('dot').style.color=d.conexion?'#63f5b0':'#ff5874';$('network').textContent=d.conexion_texto||'--';$('status').textContent=d.estado||'--';$('status').className='status '+(d.conexion?'':'offline')+(level===2?' level2':level===3?' level3':level>=4?' level4':'');$('mag').textContent=mag.toFixed(6);$('fil').textContent=Number(d.filtrada||0).toFixed(6);$('lvl').textContent=level;$('events').textContent=d.eventos||0;$('pct').textContent=Math.min(100,Math.round(mag/.15*100))+'%';$('bar').style.width=Math.min(100,mag/.15*100)+'%';$('bar').style.background=level>=4?'#ff355e':level===3?'#ff984a':level===2?'#ffe66d':'#64e8ff';$('cal').textContent=d.calibrando?'EN CURSO':'COMPLETA';$('dir').textContent=d.direccion??'--';$('peak').textContent=Number(d.maximo_evento||0).toFixed(6);$('dur').textContent=Number(d.duracion_evento||0).toFixed(2)+' s';$('age').textContent=d.tiempo_activo==null?'--':Number(d.tiempo_activo).toFixed(1)+' s';$('event').textContent=d.evento_activo?'SÍ':'NO';$('samples').textContent=d.muestras||0;$('recipients').textContent=d.destinatarios_configurados||0;const c=d.correo||{};$('mail').textContent=c.tipo?(c.ok?'OK · ':'ERROR · ')+c.tipo:'SIN ENVÍOS';history.push(mag);if(history.length>120)history.shift();drawHistory()}
-const socket=io({transports:['websocket','polling'],reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:1000,reconnectionDelayMax:5000});socket.on('connect',()=>{$('ws').textContent='WEBSOCKET CONECTADO';socket.emit('solicitar_estado')});socket.on('disconnect',()=>{$('ws').textContent='RECONEXIÓN EN CURSO';$('dot').style.color='#ffd66b'});socket.on('connect_error',()=>{$('ws').textContent='ERROR DE CONEXIÓN'});socket.on('estado',paint);socket.on('snapshot',paint);setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString('es-CL',{hour12:false}),250);setInterval(()=>{if(lastData&&Date.now()-lastData>15000){$('network').textContent='SIN DATOS';$('conn').textContent='SENSOR SIN COMUNICACIÓN';$('status').className='status offline'}},2000);
-</script></body></html>"""
-
-@app.route('/')
-def inicio():
-    return Response(PAGINA, mimetype='text/html')
-
-@socketio.on('solicitar_estado')
-def socket_solicitar_estado():
-    with lock:
-        emit_data = construir_estado()
-    socketio.emit('snapshot', emit_data, to=request.sid)
-
-
 @app.route('/datos', methods=['POST'])
 def recibir_datos():
     datos = request.get_json(silent=True)
@@ -499,7 +467,6 @@ def recibir_datos():
         actualizar_estado(valor, datos)
         result = construir_estado()
 
-    socketio.emit('estado', result)
     return jsonify({
         'ok': True,
         'estado': result['estado'],
@@ -549,6 +516,188 @@ def probar_correo():
     }), (200 if ok else 502)
 
 
+PAGINA = r'''<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SEISMIC CORE X</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#050b12;--panel:rgba(7,18,29,.94);--line:#1b3949;--cyan:#64e8ff;--green:#63f5b0;--yellow:#ffd66b;--orange:#ffad70;--red:#ff5874;--muted:#8299a8}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 48% 0%,#102637 0%,#07111c 48%,#03070d 100%);color:#e5f2f7;font-family:Inter,Segoe UI,Arial,sans-serif}
+body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.035;background:repeating-linear-gradient(transparent 0 4px,rgba(100,232,255,.18) 5px);z-index:5}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:19px 26px;border-bottom:1px solid #203c4b;background:rgba(3,10,17,.92);box-shadow:0 8px 30px #0005}
+.logo{color:var(--cyan);font-size:clamp(22px,3vw,35px);font-weight:750;letter-spacing:3px;text-shadow:0 0 22px #00bfff33}
+.sub{color:#8da6b5;font-size:10px;letter-spacing:2px;margin-top:6px}
+.connection{font-size:12px;color:var(--yellow);text-align:right}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--yellow);margin-right:7px;box-shadow:0 0 10px currentColor}
+main{padding:16px;max-width:1800px;margin:auto}
+.grid{display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(300px,1fr) minmax(260px,.8fr);gap:14px}
+.panel{position:relative;background:linear-gradient(145deg,rgba(12,29,43,.96),rgba(5,15,25,.96));border:1px solid #203d4d;border-radius:13px;padding:17px;min-width:0;box-shadow:0 12px 35px #0003,inset 0 1px #ffffff08}
+.panel:before{content:'';position:absolute;top:-1px;left:15px;width:66px;border-top:2px solid var(--cyan);opacity:.8}
+.heading{font-size:10px;color:#9dc8d8;letter-spacing:2px;margin-bottom:16px;font-weight:700}
+.radar-wrap{position:relative;width:100%;max-width:470px;aspect-ratio:1;margin:auto;border-radius:50%;overflow:hidden;background:rgba(3,15,12,.95);border:1px solid rgba(99,245,176,.65);box-shadow:0 0 0 5px rgba(4,19,15,.96),0 0 0 7px rgba(57,255,155,.35),0 0 45px rgba(57,255,155,.22),inset 0 0 40px rgba(0,0,0,.85)}
+#mapa{position:absolute;inset:0;z-index:1;background:#03120d;isolation:isolate;border-radius:50%;overflow:hidden}
+/* Efecto translúcido y más transparente en las tesinas del mapa */
+#mapa:after{content:'';position:absolute;inset:0;z-index:450;pointer-events:none;background:radial-gradient(ellipse at 40% 40%,rgba(63,245,176,.15) 0%,transparent 65%),linear-gradient(145deg,rgba(2,24,18,.15),rgba(0,8,6,.35));mix-blend-mode:screen}
+#mapa .leaflet-tile-pane{filter:invert(0.9) hue-rotate(185deg) brightness(0.85) contrast(1.4) saturate(1.2);opacity:.78}
+#radar{position:absolute;inset:0;width:100%;height:100%;z-index:2;display:block;background:transparent;pointer-events:none}
+.leaflet-container{background:#03120d!important}
+.leaflet-control-attribution{font-size:7px!important;background:rgba(3,17,12,.72)!important;color:#b8dfd1!important;border:1px solid rgba(95,205,175,.16);border-radius:6px 0 0 0;backdrop-filter:blur(9px);padding:2px 5px!important}
+.leaflet-control-attribution a{color:#81e9d0!important}
+.street-text-label{background:transparent;border:none;box-shadow:none;color:#ffffff;font:700 11px Inter,Arial,sans-serif;letter-spacing:.8px;text-shadow:0 0 5px #000,0 0 9px #000,0 0 12px #39ff9b;white-space:nowrap}
+.radar-label{text-align:center;color:#c8eee7;font-size:12px;font-weight:700;margin-top:17px;letter-spacing:1.8px;text-shadow:0 0 14px rgba(45,220,180,.16)}
+.status{border:1px solid var(--green);color:var(--green);text-align:center;padding:15px 7px;font-size:clamp(13px,1.8vw,19px);font-weight:bold;margin-bottom:12px;text-shadow:0 0 12px currentColor}
+.level2{color:var(--yellow)!important;border-color:var(--yellow)!important}
+.level3{color:var(--orange)!important;border-color:var(--orange)!important}
+.level4{color:var(--red)!important;border-color:var(--red)!important;animation:blink .7s infinite}
+.offline{color:var(--muted)!important;border-color:var(--muted)!important}
+@keyframes blink{50%{opacity:.48}}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.metric{background:#000a14b3;border:1px solid #103346;padding:12px 10px;min-height:83px}
+.label{color:var(--muted);font-size:10px;letter-spacing:1px}
+.value{color:var(--cyan);font-size:clamp(20px,2.4vw,29px);margin-top:10px}
+.unit{color:var(--muted);font-size:10px}
+.bar{height:7px;background:#102c3b;margin-top:9px}
+.bar-inner{height:100%;width:0;background:var(--cyan);transition:width .25s}
+.info-row{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #123040;font-size:11px}
+.info-row span:first-child{color:var(--muted)}
+.info-row span:last-child{text-align:right;overflow-wrap:anywhere}
+.clock-panel{display:flex;align-items:center;justify-content:center;gap:16px;margin:13px auto 0;padding:12px;border:1px solid var(--line);background:#000a14b3;color:var(--muted);font-size:10px;letter-spacing:2px}
+.clock-panel strong{color:var(--cyan);font-size:clamp(20px,2.5vw,28px);letter-spacing:3px;text-shadow:0 0 12px #00eaff55;font-weight:600}
+#history{width:100%;height:100px;display:block;background:#03111b;border:1px solid #103346}
+.footer{color:#527d8c;font-size:10px;text-align:center;padding:18px 5px 8px;letter-spacing:1px}
+@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.side{grid-column:1/-1}}
+@media(max-width:680px){header{align-items:flex-start;flex-direction:column}.connection{text-align:left}.grid{grid-template-columns:1fr}.side{grid-column:auto}main{padding:8px}}
+</style>
+</head>
+<body>
+<header>
+<div>
+<div class="logo">SEISMIC CORE X</div>
+<div class="sub">EL SISTEMA ESTÁ DETECTANDO · TELEMETRÍA EN VIVO</div>
+</div>
+<div class="connection">
+<div><span class="dot" id="dot"></span><span id="conn">EN LÍNEA</span></div>
+</div>
+</header>
 
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), allow_unsafe_werkzeug=True)
+<main>
+<div class="grid">
+<section class="panel">
+<div class="heading">01 / RADAR DE ACTIVIDAD</div>
+<div class="radar-wrap">
+<div id="mapa"></div>
+<canvas id="radar" width="600" height="600"></canvas>
+</div>
+<div class="radar-label">SENSOR ACTIVO</div>
+<div class="clock-panel"><strong id="clock">--:--:--</strong></div>
+</section>
+
+<section class="panel">
+<div class="heading">02 / ESTADO DEL SISTEMA</div>
+<div id="status" class="status">ESPERANDO SENSOR</div>
+<div class="metrics">
+<div class="metric">
+<div class="label">MAGNITUD</div>
+<div class="value" id="mag">0.000000</div>
+<div class="unit">VALOR RECIBIDO</div>
+</div>
+<div class="metric">
+<div class="label">SEÑAL FILTRADA</div>
+<div class="value" id="fil">0.000000</div>
+<div class="unit">PROMEDIO MÓVIL</div>
+</div>
+<div class="metric">
+<div class="label">NIVEL</div>
+<div class="value" id="lvl">1</div>
+<div class="unit">CLASIFICACIÓN INTERNA</div>
+</div>
+<div class="metric">
+<div class="label">EVENTOS</div>
+<div class="value" id="events">0</div>
+<div class="unit">CONTADOR DE EVENTOS</div>
+</div>
+</div>
+<div class="info-row"><span>INTENSIDAD RELATIVA</span><span id="pct">0%</span></div>
+<div class="bar"><div class="bar-inner" id="bar"></div></div>
+</section>
+
+<section class="panel side">
+<div class="heading">03 / TELEMETRÍA</div>
+<div class="info-row"><span>COMUNICACIÓN</span><span id="network">ESPERANDO</span></div>
+<div class="info-row"><span>CALIBRACIÓN</span><span id="cal">PENDIENTE</span></div>
+<div class="info-row"><span>DIRECCIÓN</span><span id="dir">--</span></div>
+<div class="info-row"><span>PICO DEL EVENTO</span><span id="peak">0.000000</span></div>
+<div class="info-row"><span>DURACIÓN</span><span id="dur">0.00 s</span></div>
+<div class="info-row"><span>ÚLTIMA SEÑAL</span><span id="age">--</span></div>
+<div class="info-row"><span>UMBRAL MOVIMIENTO</span><span>0.035</span></div>
+<div class="info-row"><span>UMBRAL BRUSCO</span><span>0.060</span></div>
+<div class="info-row"><span>UMBRAL ACTIVIDAD SOSTENIDA</span><span>0.060 / 3 s</span></div>
+<div class="info-row"><span>UMBRAL CRÍTICO</span><span>0.150</span></div>
+<div class="heading" style="margin-top:20px">04 / SEÑAL EN VIVO</div>
+<canvas id="history" width="700" height="180"></canvas>
+<div class="info-row"><span>MUESTRAS RECIBIDAS</span><span id="samples">0</span></div>
+<div class="info-row"><span>DESTINATARIOS</span><span id="recipients">0</span></div>
+<div class="info-row"><span>ÚLTIMO CORREO</span><span id="mail">SIN ENVÍOS</span></div>
+</section>
+</div>
+<div class="footer">SEISMIC CORE X // TELEMETRÍA EXPERIMENTAL // NO ES UN SISTEMA OFICIAL DE ALERTA SÍSMICA</div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+
+const mapa=L.map('mapa',{
+    zoomControl:false,
+    attributionControl:false,
+    dragging:false,
+    scrollWheelZoom:false,
+    doubleClickZoom:false,
+    touchZoom:false,
+    keyboard:false
+}).setView([-33.4937,-70.7474],15);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom:19,
+    crossOrigin:true
+}).addTo(mapa);
+
+L.marker([-33.4937,-70.7474],{
+    icon:L.divIcon({
+        className:'',
+        html:'<div style="width:2px;height:2px;"></div>',
+        iconSize:[2,2],
+        iconAnchor:[1,1]
+    })
+}).addTo(mapa).bindTooltip('PUERTO CÁRDENAS',{
+    permanent:true,
+    direction:'top',
+    offset:[0,-2],
+    className:'street-text-label'
+});
+
+setTimeout(()=>mapa.invalidateSize(),500);
+
+const rc=$('radar').getContext('2d');
+const hc=$('history').getContext('2d');
+
+let angle=0;
+let enabled=false;
+let paused=false;
+let audio=null;
+let lastSweep=-1;
+let level=1;
+let mag=0;
+let radarMag=0;
+let history=Array(120).fill(0);
+let lastStatus='';
+
+function color(l){
+    return l>=4?'#ff355e':
+           l===3?'#ff984a':
+           l===2?'#ffe66d':
+           '#39ff
