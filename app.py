@@ -1,9 +1,15 @@
 from flask import Flask, request, jsonify, Response
+from flask_sock import Sock
 from collections import deque
 from threading import Lock, Thread
 import json, math, os, time, urllib.request, urllib.error, html
 
 app = Flask(__name__)
+sock = Sock(app)
+
+# Clientes WebSocket conectados: cada socket tiene su propio bloqueo de envío.
+clientes_ws = {}
+clientes_ws_lock = Lock()
 
 # SEISMIC CORE X — umbrales experimentales originales
 UMBRAL_VIBRACION = 0.035
@@ -431,6 +437,108 @@ def construir_estado():
     }
 
 
+
+def difundir_estado(estado_actual):
+    """Envía el estado actual a todos los paneles y sensores conectados."""
+    mensaje = json.dumps(estado_actual, ensure_ascii=False)
+    with clientes_ws_lock:
+        clientes = list(clientes_ws.items())
+
+    desconectados = []
+    for ws, send_lock in clientes:
+        try:
+            with send_lock:
+                ws.send(mensaje)
+        except Exception:
+            desconectados.append(ws)
+
+    if desconectados:
+        with clientes_ws_lock:
+            for ws in desconectados:
+                clientes_ws.pop(ws, None)
+
+
+def interpretar_muestra(datos):
+    """Obtiene la magnitud desde magnitud/vibración o desde los ejes x, y, z."""
+    valor = obtener_magnitud(datos)
+    if valor is not None:
+        return valor
+
+    x = datos.get('x', datos.get('ax'))
+    y = datos.get('y', datos.get('ay'))
+    z = datos.get('z', datos.get('az'))
+
+    if x is None or y is None or z is None:
+        return None
+
+    return abs(math.sqrt(num(x)**2 + num(y)**2 + num(z)**2) - 1.0)
+
+
+@sock.route('/ws')
+def websocket_seismic(ws):
+    """Canal WebSocket para recibir telemetría y difundir el estado en vivo."""
+    send_lock = Lock()
+    with clientes_ws_lock:
+        clientes_ws[ws] = send_lock
+
+    try:
+        with lock:
+            estado_inicial = construir_estado()
+        with send_lock:
+            ws.send(json.dumps(estado_inicial, ensure_ascii=False))
+
+        while True:
+            mensaje = ws.receive()
+            if mensaje is None:
+                break
+
+            try:
+                datos = json.loads(mensaje)
+            except (TypeError, json.JSONDecodeError):
+                with send_lock:
+                    ws.send(json.dumps({
+                        'ok': False,
+                        'error': 'Mensaje inválido: se esperaba JSON'
+                    }, ensure_ascii=False))
+                continue
+
+            if not isinstance(datos, dict):
+                with send_lock:
+                    ws.send(json.dumps({
+                        'ok': False,
+                        'error': 'El mensaje JSON debe ser un objeto'
+                    }, ensure_ascii=False))
+                continue
+
+            # Los paneles envían heartbeat para actualizar el estado de conexión.
+            if datos.get('tipo') == 'heartbeat':
+                with lock:
+                    estado_actual = construir_estado()
+                difundir_estado(estado_actual)
+                continue
+
+            valor = interpretar_muestra(datos)
+            if valor is None:
+                with send_lock:
+                    ws.send(json.dumps({
+                        'ok': False,
+                        'error': 'Falta magnitud o ejes x, y, z'
+                    }, ensure_ascii=False))
+                continue
+
+            with lock:
+                actualizar_estado(valor, datos)
+                estado_actual = construir_estado()
+
+            difundir_estado(estado_actual)
+
+    except Exception as e:
+        app.logger.info('Conexión WebSocket cerrada: %s', e)
+    finally:
+        with clientes_ws_lock:
+            clientes_ws.pop(ws, None)
+
+
 @app.route('/datos', methods=['POST'])
 def recibir_datos():
     datos = request.get_json(silent=True)
@@ -697,7 +805,307 @@ let history=Array(120).fill(0);
 let lastStatus='';
 
 function color(l){
-    return l>=4?'#ff355e':
-           l===3?'#ff984a':
-           l===2?'#ffe66d':
-           '#39ff
+    return l >= 4 ? '#ff355e' :
+           l === 3 ? '#ff984a' :
+           l === 2 ? '#ffe66d' :
+           '#39ff9b';
+}
+
+function dibujarRadar(){
+    const w = $('radar').width;
+    const h = $('radar').height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const r = Math.min(w, h) * 0.47;
+
+    rc.clearRect(0, 0, w, h);
+
+    // Anillos del radar
+    rc.save();
+    rc.strokeStyle = 'rgba(57,255,155,0.25)';
+    rc.lineWidth = 1;
+
+    for(let i = 1; i <= 4; i++){
+        rc.beginPath();
+        rc.arc(cx, cy, r * i / 4, 0, Math.PI * 2);
+        rc.stroke();
+    }
+
+    rc.beginPath();
+    rc.moveTo(cx - r, cy);
+    rc.lineTo(cx + r, cy);
+    rc.moveTo(cx, cy - r);
+    rc.lineTo(cx, cy + r);
+    rc.stroke();
+
+    // Barrido giratorio
+    const grad = rc.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, 'rgba(57,255,155,0.02)');
+    grad.addColorStop(1, 'rgba(57,255,155,0.20)');
+
+    rc.beginPath();
+    rc.moveTo(cx, cy);
+    rc.arc(cx, cy, r, angle - 0.45, angle);
+    rc.closePath();
+    rc.fillStyle = grad;
+    rc.fill();
+
+    rc.beginPath();
+    rc.moveTo(cx, cy);
+    rc.lineTo(
+        cx + Math.cos(angle) * r,
+        cy + Math.sin(angle) * r
+    );
+    rc.strokeStyle = 'rgba(99,255,180,0.95)';
+    rc.lineWidth = 2;
+    rc.shadowColor = '#39ff9b';
+    rc.shadowBlur = 12;
+    rc.stroke();
+
+    // Punto de actividad cuando existe movimiento
+    if(enabled && radarMag > 0.001){
+        const intensidad = Math.min(radarMag / 0.15, 1);
+        const distancia = r * (0.2 + intensidad * 0.65);
+        const px = cx + Math.cos(angle * 0.7) * distancia;
+        const py = cy + Math.sin(angle * 0.7) * distancia;
+        const c = color(level);
+
+        rc.beginPath();
+        rc.arc(px, py, 5 + intensidad * 7, 0, Math.PI * 2);
+        rc.fillStyle = c;
+        rc.shadowColor = c;
+        rc.shadowBlur = 20;
+        rc.fill();
+
+        rc.beginPath();
+        rc.arc(px, py, 12 + intensidad * 10, 0, Math.PI * 2);
+        rc.strokeStyle = c;
+        rc.lineWidth = 1.5;
+        rc.stroke();
+    }
+
+    rc.restore();
+}
+
+function dibujarHistorial(){
+    const w = $('history').width;
+    const h = $('history').height;
+
+    hc.clearRect(0, 0, w, h);
+    hc.fillStyle = '#03111b';
+    hc.fillRect(0, 0, w, h);
+
+    hc.strokeStyle = 'rgba(100,232,255,0.12)';
+    hc.lineWidth = 1;
+
+    for(let y = 0; y <= h; y += h / 4){
+        hc.beginPath();
+        hc.moveTo(0, y);
+        hc.lineTo(w, y);
+        hc.stroke();
+    }
+
+    const maximo = Math.max(
+        0.2,
+        ...history.map(v => Math.abs(v))
+    );
+
+    hc.beginPath();
+
+    history.forEach((v, i) => {
+        const x = i * w / (history.length - 1);
+        const y = h - 8 - Math.min(Math.abs(v) / maximo, 1) * (h - 16);
+
+        if(i === 0) hc.moveTo(x, y);
+        else hc.lineTo(x, y);
+    });
+
+    hc.strokeStyle = color(level);
+    hc.lineWidth = 2;
+    hc.shadowColor = color(level);
+    hc.shadowBlur = 7;
+    hc.stroke();
+    hc.shadowBlur = 0;
+}
+
+function actualizarPanel(d){
+    const conectado = d.conexion === true;
+
+    $('conn').textContent = conectado
+        ? 'EN LÍNEA'
+        : 'SENSOR SIN COMUNICACIÓN';
+
+    $('dot').style.background = conectado
+        ? '#63f5b0'
+        : '#ff5874';
+
+    $('dot').style.color = conectado
+        ? '#63f5b0'
+        : '#ff5874';
+
+    $('status').textContent = d.estado || 'ESPERANDO SENSOR';
+    $('status').className = 'status';
+
+    if(!conectado){
+        $('status').classList.add('offline');
+    }else if(d.nivel >= 4){
+        $('status').classList.add('level4');
+    }else if(d.nivel === 3){
+        $('status').classList.add('level3');
+    }else if(d.nivel === 2){
+        $('status').classList.add('level2');
+    }
+
+    $('network').textContent = d.conexion_texto || 'ESPERANDO';
+    $('mag').textContent = Number(d.magnitud || 0).toFixed(6);
+    $('fil').textContent = Number(d.filtrada || 0).toFixed(6);
+    $('lvl').textContent = d.nivel ?? 1;
+    $('events').textContent = d.eventos ?? 0;
+    $('cal').textContent = d.calibrando ? 'EN CALIBRACIÓN' : 'COMPLETADA';
+    $('dir').textContent = d.direccion ?? '--';
+    $('peak').textContent = Number(d.maximo_evento || 0).toFixed(6);
+    $('dur').textContent = Number(d.duracion_evento || 0).toFixed(2) + ' s';
+    $('age').textContent = d.tiempo_activo == null
+        ? '--'
+        : Number(d.tiempo_activo).toFixed(1) + ' s';
+    $('samples').textContent = d.muestras ?? 0;
+    $('recipients').textContent = d.destinatarios_configurados ?? 0;
+
+    const intensidad = Math.min(
+        100,
+        Math.max(0, Number(d.magnitud || 0) / 0.15 * 100)
+    );
+
+    $('pct').textContent = intensidad.toFixed(1) + '%';
+    $('bar').style.width = intensidad + '%';
+    $('bar').style.background = color(Number(d.nivel || 1));
+
+    if(d.correo){
+        const c = d.correo;
+        $('mail').textContent = c.tipo
+            ? c.tipo + ' — ' + (c.ok === true ? 'OK' : c.ok === false ? 'ERROR' : 'PENDIENTE')
+            : 'SIN ENVÍOS';
+        $('mail').title = c.detalle || '';
+    }
+
+    level = Number(d.nivel || 1);
+    mag = Number(d.magnitud || 0);
+    radarMag = Math.max(
+        Number(d.magnitud || 0),
+        Number(d.filtrada || 0)
+    );
+    enabled = conectado;
+
+    history.push(conectado ? mag : 0);
+    if(history.length > 120) history.shift();
+
+    dibujarHistorial();
+}
+
+let socket = null;
+let heartbeatTimer = null;
+let reconnectTimer = null;
+
+function conectarWebSocket(){
+    if(socket && (socket.readyState === WebSocket.OPEN ||
+                  socket.readyState === WebSocket.CONNECTING)) return;
+
+    const protocolo = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket = new WebSocket(`${protocolo}//${location.host}/ws`);
+
+    socket.addEventListener('open', () => {
+        paused = false;
+        $('conn').textContent = 'WEBSOCKET CONECTADO';
+        $('network').textContent = 'CANAL EN VIVO';
+        if(heartbeatTimer) clearInterval(heartbeatTimer);
+        // Mantiene actualizado el panel incluso cuando no llegan muestras nuevas.
+        heartbeatTimer = setInterval(() => {
+            if(socket && socket.readyState === WebSocket.OPEN){
+                socket.send(JSON.stringify({tipo:'heartbeat'}));
+            }
+        }, 2000);
+    });
+
+    socket.addEventListener('message', event => {
+        try{
+            const datos = JSON.parse(event.data);
+            if(datos && datos.ok === false && datos.error){
+                console.warn('WebSocket:', datos.error);
+                return;
+            }
+            actualizarPanel(datos);
+            paused = false;
+        }catch(error){
+            console.error('Mensaje WebSocket no válido:', error);
+        }
+    });
+
+    socket.addEventListener('error', () => {
+        paused = true;
+        $('conn').textContent = 'ERROR DE CONEXIÓN';
+        $('network').textContent = 'NO DISPONIBLE';
+        $('status').textContent = 'NO SE PUEDE CONECTAR AL SERVIDOR';
+        $('status').className = 'status offline';
+        $('dot').style.background = '#ff5874';
+        enabled = false;
+    });
+
+    socket.addEventListener('close', () => {
+        if(heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+        paused = true;
+        $('conn').textContent = 'REINTENTANDO WEBSOCKET';
+        $('network').textContent = 'SIN CANAL';
+        $('status').textContent = 'RECONECTANDO CON EL SERVIDOR';
+        $('status').className = 'status offline';
+        $('dot').style.background = '#ff5874';
+        enabled = false;
+        if(reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(conectarWebSocket, 2000);
+    });
+}
+
+function animar(){
+    angle += 0.012;
+    if(angle >= Math.PI * 2){
+        angle -= Math.PI * 2;
+    }
+
+    dibujarRadar();
+    requestAnimationFrame(animar);
+}
+
+function actualizarReloj(){
+    $('clock').textContent = new Date().toLocaleTimeString(
+        'es-CL',
+        {hour12: false}
+    );
+}
+
+actualizarReloj();
+setInterval(actualizarReloj, 1000);
+conectarWebSocket();
+animar();
+
+window.addEventListener('resize', () => {
+    dibujarRadar();
+    dibujarHistorial();
+});
+</script>
+</body>
+</html>'''
+
+
+@app.route('/')
+def inicio():
+    return Response(PAGINA, mimetype='text/html')
+
+
+if __name__ == '__main__':
+    puerto = int(os.environ.get('PORT', 5000))
+    app.run(
+        host='0.0.0.0',
+        port=puerto,
+        debug=False,
+        threaded=True
+    )
